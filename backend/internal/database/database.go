@@ -29,3 +29,23 @@ func Open(path string) (*gorm.DB, error) {
 	}
 	return db, nil
 }
+
+// Close 关闭数据库前把 WAL 内容合并回主库文件。
+// 不这么做的话，正常退出后数据仍留在 -wal 文件里，
+// 此时直接 cp workbench.db 会丢失全部数据。
+func Close(db *gorm.DB) error {
+	if db == nil {
+		return nil
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		return err
+	}
+	// TRUNCATE 会 checkpoint 并清空 WAL 文件
+	if _, err := sqlDB.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
+		// checkpoint 失败不阻止关闭，但要记下来
+		_ = sqlDB.Close()
+		return fmt.Errorf("wal checkpoint: %w", err)
+	}
+	return sqlDB.Close()
+}

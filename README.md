@@ -100,16 +100,106 @@ docker compose logs -f workbench
 
 **安全特性**：源站**不开放任何入站端口**，cloudflared 主动外连；SSL 由 Cloudflare 托管，无需 Certbot。
 
-### 3. 备份
+### 3. 数据持久化（重要）
 
-数据是单个 SQLite 文件：
+**所有数据都存放在宿主机上，不在容器内部。** 容器是无状态的，删掉容器、拉新镜像都不会丢数据。
 
-```bash
-# 每日备份到宿主机
-0 3 * * * cp /path/to/personal-workbench/data/workbench.db /backup/workbench-$(date +\%F).db
+`docker-compose.yml` 里的挂载：
+
+```yaml
+volumes:
+  - ./data:/app/data     # 宿主机 ./data  ←→  容器 /app/data
 ```
 
-> WAL 模式下建议用 `sqlite3 workbench.db ".backup /backup/x.db"` 保证一致性。
+容器内 `/app/data` 目录的内容：
+
+| 文件 | 说明 |
+|---|---|
+| `workbench.db` | **SQLite 数据库**：项目、客户、收款、任务、提醒、里程碑、账号 |
+| `workbench.db-wal` | 预写日志，运行期间新数据先写这里 |
+| `workbench.db-shm` | WAL 共享内存索引 |
+| `.jwt_secret` | JWT 签名密钥（删了会导致所有登录失效） |
+
+对应宿主机路径就是 `./data/`，直接 `ls data/` 能看到这些文件。
+
+**用预构建镜像时也要挂载**：
+
+```bash
+docker run -d --name workbench \
+  -p 8080:8080 \
+  -v /你的/数据目录:/app/data \
+  -e ADMIN_PASS='强密码' \
+  --restart unless-stopped \
+  ghcr.io/weihebai/personal-workbench:latest
+```
+
+> ⚠️ 不挂载 `-v` 的话，数据会随容器删除而消失；`:ro` 只读挂载会导致无法写入、启动失败。
+
+**换成绝对路径**（推荐生产环境，避免在哪个目录执行 compose 就建到哪）：
+
+```yaml
+volumes:
+  - /opt/workbench/data:/app/data
+```
+
+### 4. 备份与恢复
+
+#### 备份
+
+程序**正常停止时会自动把 WAL 合并回主库**，所以最稳妥的方式是停止容器后复制：
+
+```bash
+# 停止 → 复制 → 启动
+docker compose stop workbench
+cp data/workbench.db /backup/workbench-$(date +%F).db
+docker compose start workbench
+```
+
+如果不想停服务，可以对 WAL 文件做主库+日志的完整快照（两步之间可能有新写入，一致性弱于停机备份）：
+
+```bash
+# 同时复制三个文件才算完整
+cp data/workbench.db      /backup/wb-$(date +%F).db
+cp data/workbench.db-wal  /backup/wb-$(date +%F).db-wal
+cp data/workbench.db-shm  /backup/wb-$(date +%F).db-shm
+```
+
+> ⚠️ **绝对不能只 `cp workbench.db`**：WAL 模式下运行中的数据大部分还在 `workbench.db-wal` 里，
+> 单独复制主库文件只会得到一个几乎空白的数据库。这是 SQLite WAL 模式的固有问题。
+>
+> 实测对比：只 cp 主库 → 恢复后数据为空；停机后 cp → 恢复后数据完整。
+
+#### 恢复
+
+```bash
+docker compose down
+cp /backup/workbench-2026-10-20.db data/workbench.db
+rm -f data/workbench.db-wal data/workbench.db-shm   # 必须清掉旧的 WAL
+docker compose up -d
+```
+
+#### 定时备份（systemd timer 或 cron）
+
+```bash
+# 每天 3 点：先停服务再备份，保证一致性
+0 3 * * * cd /opt/workbench && docker compose stop workbench && \
+  cp data/workbench.db /backup/workbench-$(date +\%F).db && \
+  docker compose start workbench
+```
+
+### 5. 迁移到新服务器
+
+```bash
+# 旧机器：停止并打包
+docker compose stop workbench
+tar czf wb-data.tar.gz data/
+
+# 新机器：还原
+tar xzf wb-data.tar.gz
+docker compose up -d
+```
+
+`data/` 目录就是全部状态，拷过去即可。
 
 ---
 

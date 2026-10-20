@@ -15,7 +15,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-}
       TOKEN_TTL_HOURS: ${TOKEN_TTL_HOURS:-168}
     volumes:
-      - ./data:/app/data
+      # 数据全部落在宿主机，容器无状态：删容器/换镜像都不丢数据。
+      # 默认 ./data（相对 compose 文件所在目录），生产建议在 .env 里设绝对路径：
+      #   DATA_DIR=/opt/workbench/data
+      - ${DATA_DIR:-./data}:/app/data
     # 不暴露到公网：由 cloudflared 通过内部网络访问
     expose:
       - "8080"

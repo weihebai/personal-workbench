@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"log"
@@ -156,4 +157,19 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("正在关闭服务...")
+
+	// 先停止接收新请求，让进行中的请求完成
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("HTTP 关闭超时: %v", err)
+	}
+
+	// 关闭数据库：触发 WAL checkpoint，保证数据全部落回主库文件
+	if err := database.Close(db); err != nil {
+		log.Printf("数据库关闭异常: %v", err)
+	} else {
+		log.Println("数据库已关闭，WAL 已合并")
+	}
+	log.Println("服务已退出")
 }
