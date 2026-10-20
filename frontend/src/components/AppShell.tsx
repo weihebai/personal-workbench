@@ -6,6 +6,7 @@ import {
   CheckSquare,
   Wallet,
   BellRing,
+  Lightbulb,
   Users,
   Settings,
   Search,
@@ -23,11 +24,13 @@ const nav = [
   { to: '/projects', label: '项目', icon: FolderKanban },
   { to: '/tasks', label: '任务', icon: CheckSquare },
   { to: '/payments', label: '收款', icon: Wallet },
-  { to: '/reminders', label: '到期提醒', icon: BellRing },
+  { to: '/reminders', label: '到期提醒', short: '提醒', icon: BellRing },
+  { to: '/ideas', label: '灵感记录', short: '灵感', icon: Lightbulb },
   { to: '/clients', label: '客户', icon: Users },
 ]
 
-const mobileNav = nav.slice(0, 5)
+// 移动端底部 Tab：灵感是高频入口放进来；客户放进抽屉
+const mobileNav = nav.filter((n) => n.to !== '/clients')
 
 export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -176,7 +179,7 @@ export default function AppShell() {
                 )}
               >
                 <Icon size={19} strokeWidth={active ? 2.4 : 1.9} />
-                <span className="text-[10px] font-medium">{item.label}</span>
+                <span className="text-[10px] font-medium">{item.short ?? item.label}</span>
                 {badge > 0 && (
                   <span className="absolute right-1/2 top-1 -mr-4 min-w-4 rounded-full bg-red-500 px-1 text-center text-[9px] font-bold leading-4 text-white">
                     {badge > 99 ? '99' : badge}

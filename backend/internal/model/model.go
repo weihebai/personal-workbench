@@ -51,8 +51,14 @@ type Project struct {
 
 	// 财务
 	ClientID  *uint   `gorm:"index" json:"clientId"`
-	Quote     float64 `json:"quote"`  // 合同/报价总额
-	Cost      float64 `json:"cost"`   // 成本（服务器/第三方等）
+	Quote     float64 `json:"quote"` // 合同/报价总额（客户付的全款）
+	Cost      float64 `json:"cost"`  // 成本（服务器/第三方等）
+	// 中介抽成：CommissionType=pct 时 CommissionRate 是百分比（20 = 抽 20%），
+	// CommissionType=fixed 时 CommissionRate 是固定金额。
+	// 抽成从合同额里扣，记录收款时填实际到账（扣完抽成的钱）。
+	CommissionType string  `gorm:"size:16" json:"commissionType"` // none 无 / pct 按比例 / fixed 固定金额
+	CommissionRate float64 `json:"commissionRate"`
+	Broker         string  `gorm:"size:128" json:"broker"` // 中介/渠道名，如「XX接单群」
 	StartDate *time.Time `json:"startDate"`
 	DueDate   *time.Time `json:"dueDate"`
 
@@ -65,6 +71,10 @@ type Project struct {
 	// 只读聚合字段（查询时填充，不落库）
 	Received float64  `gorm:"-" json:"received"`
 	TagList  []string `gorm:"-" json:"tags"`
+
+	// 抽成与净收入（只读，由 Quote/CommissionType/CommissionRate 推算）
+	Commission float64 `gorm:"-" json:"commission"` // 抽成金额
+	NetQuote   float64 `gorm:"-" json:"netQuote"`   // 扣完抽成你应得的合同额
 
 	// 里程碑进度（列表卡片展示）
 	MilestoneTotal int    `gorm:"-" json:"milestoneTotal"`
@@ -153,6 +163,32 @@ type Milestone struct {
 	DaysLeft    *int   `gorm:"-" json:"daysLeft"` // 距目标日期剩余天数（负数=已过期）
 }
 
+// 灵感记录：随时存下好文章、开源项目、公众号推送，之后慢慢消化。
+// 是一个「收件箱」——先收集，再逐条吸收。
+type Idea struct {
+	Base
+	Title   string `gorm:"size:255" json:"title"`   // 可留空，自动从链接/正文截取
+	URL     string `gorm:"size:1024" json:"url"`    // 原文链接
+	Source  string `gorm:"size:32;index" json:"source"` // wechat 公众号 / github 开源 / article 文章 / video 视频 / other 其他
+	Content string `gorm:"type:text" json:"content"`    // 摘录 / 摘抄的正文片段
+	Note    string `gorm:"type:text" json:"note"`       // 我自己的思考、怎么用
+
+	// 消化状态：inbox 待看 / reading 在看 / digested 已消化 / archived 已归档
+	Status string `gorm:"size:16;index" json:"status"`
+	// 重要程度：1 一般 / 2 有用 / 3 很有价值
+	Star int `json:"star"`
+
+	// 自己的标签，逗号分隔（如：AI,前端,副业）
+	Tags string `gorm:"size:255" json:"tags"`
+
+	ProjectID *uint `gorm:"index" json:"projectId"` // 可选：这条灵感可用于哪个项目
+
+	// 只读
+	ProjectName string   `gorm:"-" json:"projectName"`
+	TagList     []string `gorm:"-" json:"tagList"`
+	ReadingMins int      `gorm:"-" json:"readingMins"` // 按正文字数估算阅读时间
+}
+
 // 标签
 type Tag struct {
 	Base
@@ -177,6 +213,6 @@ type Setting struct {
 func AllModels() []any {
 	return []any{
 		&User{}, &Client{}, &Project{}, &Payment{}, &Task{},
-		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{},
+		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{}, &Idea{},
 	}
 }

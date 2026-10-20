@@ -101,8 +101,11 @@ export default function ProjectDetailPage() {
   const p = data.project
   const kd = dictOf(PROJECT_KIND, p.kind)
   const sd = dictOf(PROJECT_STATUS, p.status)
-  const pct = p.quote > 0 ? Math.min(100, (p.received / p.quote) * 100) : 0
-  const remain = p.quote - p.received
+  // 收款记录的是实际到账（已扣抽成）的钱，进度和待收都要基于净合同额，
+  // 否则会把抽成那部分算成一笔永远收不到的欠款。
+  const netQuote = p.netQuote ?? p.quote
+  const pct = netQuote > 0 ? Math.min(100, (p.received / netQuote) * 100) : 0
+  const remain = netQuote - p.received
 
   return (
     <div className="space-y-3">
@@ -147,6 +150,23 @@ export default function ProjectDetailPage() {
           <Metric label="待收" value={money(remain > 0 ? remain : 0)} tone="amber" />
           <Metric label="成本 / 毛利" value={`${money(p.cost, false)} / ${money(p.received - p.cost, false)}`} />
         </div>
+
+        {/* 中介抽成 */}
+        {p.commissionType !== 'none' && p.commission > 0 && (
+          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-[11px]">
+            <span className="font-semibold text-amber-800">
+              中介抽成{' '}
+              {p.commissionType === 'pct' ? `${p.commissionRate}%` : money(p.commissionRate)}
+            </span>
+            <span className="text-ink-500">
+              抽走 <b className="tabular text-amber-700">-{money(p.commission)}</b>
+            </span>
+            <span className="text-ink-500">
+              你到手 <b className="tabular text-emerald-600">{money(p.netQuote)}</b>
+            </span>
+            {p.broker && <span className="text-ink-400">渠道：{p.broker}</span>}
+          </div>
+        )}
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-100">
           <div
             className={cn('h-full rounded-full', pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500')}

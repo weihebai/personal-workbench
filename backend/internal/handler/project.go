@@ -96,6 +96,9 @@ type projectInput struct {
 	ClientID        *uint   `json:"clientId"`
 	Quote           float64 `json:"quote"`
 	Cost            float64 `json:"cost"`
+	CommissionType  string  `json:"commissionType"`
+	CommissionRate  float64 `json:"commissionRate"`
+	Broker          string  `json:"broker"`
 	StartDate       string  `json:"startDate"`
 	DueDate         string  `json:"dueDate"`
 	EstimateMinutes int     `json:"estimateMinutes"`
@@ -110,9 +113,43 @@ func (in projectInput) toModel() model.Project {
 		SourcePath: in.SourcePath, OnlineURL: in.OnlineURL, AdminURL: in.AdminURL,
 		GitRepo: in.GitRepo, DeployAt: in.DeployAt, TechStack: in.TechStack,
 		ClientID: in.ClientID, Quote: in.Quote, Cost: in.Cost,
+		CommissionType: in.CommissionType, CommissionRate: in.CommissionRate, Broker: in.Broker,
 		StartDate: mustParseDate(in.StartDate), DueDate: mustParseDate(in.DueDate),
 		EstimateMinutes: in.EstimateMinutes, ActualMinutes: in.ActualMinutes,
 		Note: in.Note,
+	}
+}
+
+// commissionOf 按项目配置计算抽成金额。
+// 抽成不会超过合同额，避免手滑填 200% 导致净收入为负。
+func commissionOf(p *model.Project) float64 {
+	if p.Quote <= 0 || p.CommissionRate <= 0 {
+		return 0
+	}
+	var c float64
+	switch p.CommissionType {
+	case "pct":
+		c = p.Quote * p.CommissionRate / 100
+	case "fixed":
+		c = p.CommissionRate
+	default:
+		return 0
+	}
+	if c < 0 {
+		c = 0
+	}
+	if c > p.Quote {
+		c = p.Quote
+	}
+	return c
+}
+
+// fillCommission 填充抽成与净收入（只读字段）
+func fillCommission(items []model.Project) {
+	for i := range items {
+		c := commissionOf(&items[i])
+		items[i].Commission = c
+		items[i].NetQuote = items[i].Quote - c
 	}
 }
 
@@ -146,6 +183,7 @@ func (h *Handler) ListProjects(c *gin.Context) {
 		return
 	}
 	h.fillProjectStats(items)
+	fillCommission(items)
 	c.JSON(http.StatusOK, paginated(items, total, page, size))
 }
 
@@ -253,6 +291,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 	}
 	list := []model.Project{p}
 	h.fillProjectStats(list)
+	fillCommission(list)
 	p = list[0]
 
 	var payments []model.Payment
@@ -320,7 +359,9 @@ func (h *Handler) CreateProject(c *gin.Context) {
 			return
 		}
 	}
-	c.JSON(http.StatusCreated, p)
+	list := []model.Project{p}
+	fillCommission(list)
+	c.JSON(http.StatusCreated, list[0])
 }
 
 func (h *Handler) UpdateProject(c *gin.Context) {
@@ -343,6 +384,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		"source_path": in.SourcePath, "online_url": in.OnlineURL, "admin_url": in.AdminURL,
 		"git_repo": in.GitRepo, "deploy_at": in.DeployAt, "tech_stack": in.TechStack,
 		"client_id": in.ClientID, "quote": in.Quote, "cost": in.Cost,
+		"commission_type": in.CommissionType, "commission_rate": in.CommissionRate, "broker": in.Broker,
 		"start_date": mustParseDate(in.StartDate), "due_date": mustParseDate(in.DueDate),
 		"estimate_minutes": in.EstimateMinutes, "actual_minutes": in.ActualMinutes,
 		"note": in.Note,
@@ -356,6 +398,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 	h.DB.First(&fresh, id)
 	list := []model.Project{fresh}
 	h.fillProjectStats(list)
+	fillCommission(list)
 	c.JSON(http.StatusOK, list[0])
 }
 

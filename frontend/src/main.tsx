@@ -12,6 +12,7 @@ import ProjectDetailPage from './pages/ProjectDetailPage'
 import TasksPage from './pages/TasksPage'
 import PaymentsPage from './pages/PaymentsPage'
 import RemindersPage from './pages/RemindersPage'
+import IdeasPage from './pages/IdeasPage'
 import ClientsPage from './pages/ClientsPage'
 import SettingsPage from './pages/SettingsPage'
 import { getToken } from './lib/api'
@@ -46,6 +47,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/reminders" element={<RemindersPage />} />
+            <Route path="/ideas" element={<IdeasPage />} />
             <Route path="/clients" element={<ClientsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

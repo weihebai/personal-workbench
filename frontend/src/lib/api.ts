@@ -64,6 +64,13 @@ export interface Project {
   clientId?: number | null
   quote: number
   cost: number
+  commissionType: 'none' | 'pct' | 'fixed'
+  commissionRate: number
+  broker: string
+  /** 抽成金额（只读，后端计算） */
+  commission: number
+  /** 扣完抽成后应得的合同额（只读） */
+  netQuote: number
   startDate?: string | null
   dueDate?: string | null
   estimateMinutes: number
@@ -178,6 +185,10 @@ export interface DashboardData {
     pending: number
     profit: number
     unreceived: number
+    /** 中介抽成总额 */
+    commission: number
+    /** 扣完抽成的净合同额 */
+    netQuote: number
   }
   monthly: { month: string; quote: number; received: number }[]
   byKind: { kind: string; count: number; quote: number; received: number }[]
@@ -197,4 +208,29 @@ export interface FollowUp {
   daysLeft: number
   status: 'waiting' | 'delayed'
   remindDays: number
+}
+
+/** 灵感记录：先存下来，之后慢慢消化 */
+export interface Idea {
+  id: number
+  title: string
+  url: string
+  source: 'wechat' | 'github' | 'article' | 'video' | 'note' | 'other'
+  content: string
+  note: string
+  status: 'inbox' | 'reading' | 'digested' | 'archived'
+  star: number
+  tags: string
+  projectId?: number | null
+  projectName?: string
+  tagList: string[]
+  readingMins: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface IdeaStats {
+  byStatus: { inbox: number; reading: number; digested: number; archived: number }
+  total: number
+  starred: number
 }

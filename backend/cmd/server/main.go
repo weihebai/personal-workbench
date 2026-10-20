@@ -133,6 +133,14 @@ func main() {
 			authed.GET("/tags", h.ListTags)
 			authed.POST("/tags", h.CreateTag)
 			authed.DELETE("/tags/:id", h.DeleteTag)
+
+			// 灵感记录（收件箱：先存下来，再慢慢消化）
+			authed.GET("/ideas", h.ListIdeas)
+			authed.GET("/ideas/stats", h.IdeaStats)
+			authed.POST("/ideas", h.CreateIdea)
+			authed.PUT("/ideas/:id", h.UpdateIdea)
+			authed.PATCH("/ideas/:id/status", h.QuickIdeaStatus)
+			authed.DELETE("/ideas/:id", h.DeleteIdea)
 		}
 	}
 

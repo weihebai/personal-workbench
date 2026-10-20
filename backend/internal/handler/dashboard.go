@@ -72,6 +72,26 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		Scan(&projFin)
 	fin.Quote, fin.Cost = projFin.Quote, projFin.Cost
 
+	// 中介抽成总额：按比例的和按固定金额的分开算，
+	// 与 project.commissionOf 保持同一套规则（抽成不超过合同额）。
+	var commPct struct{ V float64 }
+	h.DB.Model(&model.Project{}).
+		Select("COALESCE(SUM(quote * commission_rate / 100.0),0) as v").
+		Where("commission_type = ? AND commission_rate > 0", "pct").
+		Scan(&commPct)
+	var commFixed struct{ V float64 }
+	h.DB.Model(&model.Project{}).
+		Select("COALESCE(SUM(commission_rate),0) as v").
+		Where("commission_type = ? AND commission_rate > 0", "fixed").
+		Scan(&commFixed)
+	commission := commPct.V + commFixed.V
+	if commission < 0 {
+		commission = 0
+	}
+	if commission > fin.Quote {
+		commission = fin.Quote
+	}
+
 	var payFin struct {
 		Received float64
 		Pending  float64
@@ -176,8 +196,15 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		},
 		"finance": gin.H{
 			"quote": fin.Quote, "cost": fin.Cost, "received": fin.Received,
-			"pending": fin.Pending, "profit": fin.Received - fin.Cost,
-			"unreceived": fin.Quote - fin.Received,
+			"pending": fin.Pending,
+			// 利润 = 已收 - 成本（已收是扣完抽成实际到账的钱，故不再减抽成）
+			"profit": fin.Received - fin.Cost,
+			// 净合同额 = 合同额 - 抽成
+			"commission": commission,
+			"netQuote":   fin.Quote - commission,
+			// 待收基于净合同额：收款项记录的都是实际到账（已扣抽成）的钱，
+			// 拿含抽成的合同额去减会算出一笔永远收不到的差额。
+			"unreceived": fin.Quote - commission - fin.Received,
 		},
 		"monthly":         months,
 		"byKind":          kindStats,

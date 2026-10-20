@@ -56,12 +56,13 @@ export default function ProjectsPage() {
 
   const totalQuote = items.reduce((s, p) => s + p.quote, 0)
   const totalRecv = items.reduce((s, p) => s + p.received, 0)
+  const totalCommission = items.reduce((s, p) => s + (p.commission ?? 0), 0)
 
   return (
     <div>
       <PageHeader
         title="项目"
-        desc={`${items.length} 个项目 · 合同额 ${money(totalQuote)} · 已收 ${money(totalRecv)}`}
+        desc={`${items.length} 个项目 · 合同额 ${money(totalQuote)}${totalCommission > 0 ? ` · 抽成 ${money(totalCommission)}` : ''} · 已收 ${money(totalRecv)}`}
         actions={
           <Button onClick={() => setCreating(true)} size="sm">
             <Plus size={14} /> 新建项目
@@ -108,7 +109,7 @@ export default function ProjectsPage() {
           {items.map((p) => {
             const kd = dictOf(PROJECT_KIND, p.kind)
             const sd = dictOf(PROJECT_STATUS, p.status)
-            const pct = p.quote > 0 ? Math.min(100, (p.received / p.quote) * 100) : 0
+            const pct = (p.netQuote ?? p.quote) > 0 ? Math.min(100, (p.received / (p.netQuote ?? p.quote)) * 100) : 0
             return (
               <Card key={p.id} className="group relative flex flex-col gap-2 hover:border-ink-300">
                 <div className="flex items-start gap-2">
@@ -158,8 +159,15 @@ export default function ProjectsPage() {
                   <div className="flex items-baseline justify-between">
                     <span className="tabular text-[13px] font-bold text-ink-900">
                       {money(p.received, false)}
-                      <span className="ml-0.5 text-[10px] font-normal text-ink-400">/ {money(p.quote, false)}</span>
+                      <span className="ml-0.5 text-[10px] font-normal text-ink-400">
+                        / {money(p.netQuote ?? p.quote, false)}
+                      </span>
                     </span>
+                    {p.commission > 0 && (
+                      <span className="rounded bg-amber-50 px-1 text-[9px] font-medium text-amber-600">
+                        抽成 {p.commissionType === 'pct' ? `${p.commissionRate}%` : money(p.commissionRate, false)}
+                      </span>
+                    )}
                     <span
                       className={cn(
                         'tabular text-[10px] font-semibold',

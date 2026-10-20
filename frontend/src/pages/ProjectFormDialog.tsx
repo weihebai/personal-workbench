@@ -1,13 +1,21 @@
 import * as React from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus } from 'lucide-react'
+import { Plus, Percent } from 'lucide-react'
 import { api, errMsg, type Client, type Project } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Textarea } from '@/components/ui/Input'
 import { Select, type Option } from '@/components/ui/Select'
 import { DatePicker } from '@/components/ui/DatePicker'
 import { Badge, Dialog } from '@/components/ui/Layout'
-import { cn, toDateInput, PROJECT_KIND, PROJECT_STATUS, CLIENT_SOURCES } from '@/lib/utils'
+import {
+  cn,
+  money,
+  toDateInput,
+  PROJECT_KIND,
+  PROJECT_STATUS,
+  CLIENT_SOURCES,
+  COMMISSION_TYPE,
+} from '@/lib/utils'
 import { useEscClose } from '@/lib/useEscClose'
 
 const KIND_OPTS: Option[] = Object.entries(PROJECT_KIND).map(([v, d]) => ({
@@ -22,6 +30,12 @@ const STATUS_OPTS: Option[] = Object.entries(PROJECT_STATUS).map(([v, d]) => ({
 }))
 
 const SUGGEST_TAGS = ['外包', '公司', '个人', '长期客户', '急件', '闲鱼', '小红书']
+
+const COMMISSION_OPTS: Option[] = Object.entries(COMMISSION_TYPE).map(([v, d]) => ({
+  value: v,
+  label: d.label,
+  dot: d.color,
+}))
 
 export function ProjectFormDialog({
   project,
@@ -47,6 +61,9 @@ export function ProjectFormDialog({
     clientId: project?.clientId ? String(project.clientId) : '',
     quote: project?.quote ? String(project.quote) : '',
     cost: project?.cost ? String(project.cost) : '',
+    commissionType: project?.commissionType ?? 'none',
+    commissionRate: project?.commissionRate ? String(project.commissionRate) : '',
+    broker: project?.broker ?? '',
     startDate: toDateInput(project?.startDate),
     dueDate: toDateInput(project?.dueDate),
     estimateMinutes: project?.estimateMinutes ? String(project.estimateMinutes) : '',
@@ -77,6 +94,17 @@ export function ProjectFormDialog({
     setTagInput('')
   }
 
+  // 抽成实时预览：与后端 commissionOf 保持同一套规则（抽成封顶在合同额）。
+  // 没有抽成时不显示，避免出现「抽成 -¥0.00」这种无意义提示。
+  const commitPreview = React.useMemo(() => {
+    const quote = Number(form.quote) || 0
+    const rate = Number(form.commissionRate) || 0
+    if (quote <= 0 || form.commissionType === 'none' || rate <= 0) return null
+    let commission = form.commissionType === 'pct' ? (quote * rate) / 100 : rate
+    commission = Math.max(0, Math.min(commission, quote))
+    return { quote, commission, net: quote - commission }
+  }, [form.quote, form.commissionRate, form.commissionType])
+
   const save = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -84,6 +112,7 @@ export function ProjectFormDialog({
         clientId: form.clientId ? Number(form.clientId) : null,
         quote: Number(form.quote) || 0,
         cost: Number(form.cost) || 0,
+        commissionRate: Number(form.commissionRate) || 0,
         estimateMinutes: Number(form.estimateMinutes) || 0,
         actualMinutes: Number(form.actualMinutes) || 0,
         tags,
@@ -194,7 +223,7 @@ export function ProjectFormDialog({
 
         {/* 收入与工期 */}
         <section className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
-          <Field label="合同金额">
+          <Field label="合同金额" hint="客户付的全款">
             <Input value={form.quote} onChange={set('quote')} inputMode="decimal" placeholder="0" />
           </Field>
           <Field label="成本">
@@ -212,6 +241,57 @@ export function ProjectFormDialog({
           <Field label="实际工时">
             <Input value={form.actualMinutes} onChange={set('actualMinutes')} inputMode="numeric" />
           </Field>
+        </section>
+
+        {/* 中介抽成 */}
+        <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+          <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+            <Percent size={12} /> 中介抽成
+            <span className="font-normal text-amber-600">有中介从中间接单、要抽走一部分时填这里</span>
+          </p>
+          <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
+            <Field label="抽成方式">
+              <Select
+                value={form.commissionType}
+                onChange={(v) => setForm((f) => ({ ...f, commissionType: v as any }))}
+                options={COMMISSION_OPTS}
+              />
+            </Field>
+            <Field
+              label={form.commissionType === 'fixed' ? '抽成金额' : '抽成比例'}
+              hint={form.commissionType === 'fixed' ? '元' : form.commissionType === 'pct' ? '%，如 20' : undefined}
+            >
+              <Input
+                value={form.commissionRate}
+                onChange={set('commissionRate')}
+                inputMode="decimal"
+                placeholder={form.commissionType === 'none' ? '—' : '0'}
+                disabled={form.commissionType === 'none'}
+                className={form.commissionType === 'none' ? 'bg-ink-50 text-ink-400' : ''}
+              />
+            </Field>
+            <Field label="中介 / 渠道" className="col-span-2">
+              <Input value={form.broker} onChange={set('broker')} placeholder="如：XX接单群、老李介绍" />
+            </Field>
+          </div>
+
+          {/* 实时预览：填完立刻看到到手多少 */}
+          {commitPreview && (
+            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-white/80 px-2.5 py-2 text-[11px]">
+              <span className="text-ink-500">
+                合同 <b className="tabular text-ink-900">{money(commitPreview.quote)}</b>
+              </span>
+              <span className="text-ink-500">
+                抽成 <b className="tabular text-amber-600">-{money(commitPreview.commission)}</b>
+              </span>
+              <span className="text-ink-500">
+                你到手 <b className="tabular text-emerald-600">{money(commitPreview.net)}</b>
+              </span>
+              <span className="text-ink-400">
+                收款按 {money(commitPreview.net)} 记（填实际到账）
+              </span>
+            </div>
+          )}
         </section>
 
         {/* 标签 */}

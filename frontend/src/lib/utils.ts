@@ -109,6 +109,31 @@ export const MILESTONE_STATUS = {
 
 export const CLIENT_SOURCES = ['闲鱼', '小红书', '熟人介绍', '公司', '抖音', '其他'] as const
 
+/** 中介抽成方式 */
+export const COMMISSION_TYPE = {
+  none: { label: '不抽成', color: 'bg-ink-400', soft: 'bg-ink-50 text-ink-600 border-ink-200' },
+  pct: { label: '按比例', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700 border-amber-200' },
+  fixed: { label: '固定金额', color: 'bg-violet-500', soft: 'bg-violet-50 text-violet-700 border-violet-200' },
+} as const
+
+/** 灵感记录：消化状态 */
+export const IDEA_STATUS = {
+  inbox: { label: '待看', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
+  reading: { label: '在看', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700 border-amber-200' },
+  digested: { label: '已消化', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  archived: { label: '已归档', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-400 border-ink-200' },
+} as const
+
+/** 灵感记录：来源 */
+export const IDEA_SOURCE = {
+  wechat: { label: '公众号', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  github: { label: '开源项目', color: 'bg-ink-700', soft: 'bg-ink-100 text-ink-700 border-ink-300' },
+  article: { label: '文章', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
+  video: { label: '视频', color: 'bg-rose-500', soft: 'bg-rose-50 text-rose-700 border-rose-200' },
+  note: { label: '随记', color: 'bg-brand-500', soft: 'bg-brand-50 text-brand-700 border-brand-200' },
+  other: { label: '其他', color: 'bg-ink-400', soft: 'bg-ink-50 text-ink-600 border-ink-200' },
+} as const
+
 export function dictOf<T extends Record<string, { label: string; color: string; soft: string }>>(
   d: T,
   k?: string | null,

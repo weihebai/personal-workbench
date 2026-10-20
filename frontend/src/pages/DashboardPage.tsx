@@ -83,21 +83,25 @@ export default function DashboardPage() {
           label="累计已收"
           value={money(f.received)}
           tone="emerald"
-          hint={`共 ${money(f.quote, false)} 合同额`}
+          hint={
+            f.commission > 0
+              ? `净合同 ${money(f.netQuote, false)} · 抽成 ${money(f.commission, false)}`
+              : `共 ${money(f.quote, false)} 合同额`
+          }
         />
         <StatCard
           icon={<CircleDollarSign size={14} />}
           label="待收金额"
           value={money(f.pending)}
           tone="amber"
-          hint={f.unreceived > 0 ? `另有 ${money(f.unreceived)} 未开票/未收` : '全部已结清'}
+          hint={f.unreceived > 0 ? `另有 ${money(f.unreceived)} 未收` : '全部已结清'}
         />
         <StatCard
           icon={<TrendingUp size={14} />}
           label="预估利润"
           value={money(f.profit)}
           tone="brand"
-          hint={`成本 ${money(f.cost, false)}`}
+          hint={`已收 - 成本 ${money(f.cost, false)}`}
         />
         <StatCard
           icon={<FolderKanban size={14} />}
@@ -107,6 +111,25 @@ export default function DashboardPage() {
           hint={`共 ${c.projects} 个项目`}
         />
       </div>
+
+      {/* 抽成汇总：只有真的有抽成才显示 */}
+      {f.commission > 0 && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px]">
+          <span className="font-semibold text-amber-800">中介抽成</span>
+          <span className="text-ink-500">
+            合同总额 <b className="tabular text-ink-900">{money(f.quote)}</b>
+          </span>
+          <span className="text-ink-500">
+            被抽走 <b className="tabular text-amber-700">-{money(f.commission)}</b>
+          </span>
+          <span className="text-ink-500">
+            实际应得 <b className="tabular text-emerald-600">{money(f.netQuote)}</b>
+          </span>
+          <span className="text-ink-400">
+            占合同额 {f.quote > 0 ? Math.round((f.commission / f.quote) * 100) : 0}%
+          </span>
+        </div>
+      )}
 
       {/* 图表区 */}
       <div className="grid gap-3 lg:grid-cols-3">
