@@ -116,14 +116,16 @@ func (h *Handler) Dashboard(c *gin.Context) {
 	}
 
 	// 待处理清单：逾期任务 + 待收款项 + 临期提醒
-	var overdueTasks []model.Task
+	// 都显式初始化为空切片：Go 的 nil slice 会序列化成 JSON null，
+	// 前端对 null 调用 .some()/.map() 会直接崩，空数据账号首屏就会白屏。
+	overdueTasks := []model.Task{}
 	h.DB.Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled"}).
 		Order("due_date ASC").Limit(10).Find(&overdueTasks)
 
-	var pendingPayments []model.Payment
+	pendingPayments := []model.Payment{}
 	h.DB.Where("status = ?", "pending").Order("plan_date ASC").Limit(10).Find(&pendingPayments)
 
-	var soonReminders []model.Reminder
+	soonReminders := []model.Reminder{}
 	h.DB.Where("enabled = ? AND expire_at <= ?", true, now.AddDate(0, 0, 30)).
 		Order("expire_at ASC").Limit(10).Find(&soonReminders)
 
@@ -143,7 +145,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 			msProjName[p.ID] = p.Name
 		}
 	}
-	var followUps []gin.H
+	followUps := []gin.H{}
 	followCount := 0
 	for i := range openMs {
 		dl := daysUntil(*openMs[i].DueDate)

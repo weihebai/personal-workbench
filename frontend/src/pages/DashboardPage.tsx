@@ -39,7 +39,20 @@ import { daysLeftText } from '@/lib/workday'
 export default function DashboardPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard'],
-    queryFn: async () => (await api.get<DashboardData>('/dashboard')).data,
+    queryFn: async () => {
+      const d = (await api.get<DashboardData>('/dashboard')).data
+      // 后端未初始化切片的字段可能是 null，统一归一化为数组，
+      // 避免空数据账号（新部署）打开总览页直接崩溃。
+      return {
+        ...d,
+        followUps: d.followUps ?? [],
+        overdueTasks: d.overdueTasks ?? [],
+        pendingPayments: d.pendingPayments ?? [],
+        soonReminders: d.soonReminders ?? [],
+        monthly: d.monthly ?? [],
+        byKind: d.byKind ?? [],
+      }
+    },
   })
 
   if (isLoading || !data) {
