@@ -1,0 +1,142 @@
+@import "tailwindcss";
+
+/* ============================================================
+   高饱和明亮主题 —— 白底 + 强对撞色
+   信息密度优先：紧凑间距、细描边、清晰层级
+   ============================================================ */
+@theme {
+  /* 品牌主色：亮橙（能量、收入、行动） */
+  --color-brand-50: #fff4ed;
+  --color-brand-100: #ffe6d5;
+  --color-brand-200: #feccaa;
+  --color-brand-300: #fdac74;
+  --color-brand-400: #fb8a3c;
+  --color-brand-500: #f96f12;
+  --color-brand-600: #ea5508;
+  --color-brand-700: #c23e0a;
+  --color-brand-800: #9a330f;
+  --color-brand-900: #7c2c10;
+
+  /* 辅助对撞色：亮青（内容/流量） */
+  --color-cyan-brand-500: #06b6d4;
+  --color-cyan-brand-600: #0891b2;
+
+  /* 成功 / 资金 */
+  --color-money-500: #10b981;
+  --color-money-600: #059669;
+
+  /* 警示 */
+  --color-warn-500: #f59e0b;
+  --color-danger-500: #ef4444;
+  --color-violet-500: #8b5cf6;
+
+  /* 中性：偏冷白，避免发灰 */
+  --color-ink-950: #0b1220;
+  --color-ink-900: #111827;
+  --color-ink-700: #374151;
+  --color-ink-500: #6b7280;
+  --color-ink-400: #9ca3af;
+  --color-ink-300: #d1d5db;
+  --color-ink-200: #e5e7eb;
+  --color-ink-100: #f1f3f7;
+  --color-ink-50: #f8fafc;
+
+  --radius-card: 10px;
+}
+
+:root {
+  --bg: #f7f8fc;
+  --surface: #ffffff;
+  --border: #e6e9f0;
+  --text: #0b1220;
+  --text-muted: #6b7280;
+
+  --sidebar-bg: #ffffff;
+  --sidebar-active-bg: var(--color-brand-50);
+  --sidebar-active-fg: var(--color-brand-600);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 数字等宽，财务表格对齐 */
+.tabular {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* 卡片 */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+}
+
+/* 高饱和渐变强调条：用于统计卡片顶部 */
+.card-accent {
+  position: relative;
+  overflow: hidden;
+}
+.card-accent::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--color-brand-500), var(--color-brand-300) 55%, transparent);
+}
+
+/* 紧凑滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d5dae4;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #b9c0cd;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 移动端安全区 */
+.safe-bottom {
+  padding-bottom: max(env(safe-area-inset-bottom), 0px);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-in {
+  animation: fade-in 0.18s ease-out;
+}
+
+/* 状态圆点 */
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  display: inline-block;
+  flex: none;
+}

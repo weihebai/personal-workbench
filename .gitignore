@@ -1,0 +1,12 @@
+node_modules/
+dist/
+data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.jwt_secret
+.DS_Store
+*.log
+bin/
+*.tsbuildinfo

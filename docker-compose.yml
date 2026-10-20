@@ -1,0 +1,38 @@
+services:
+  workbench:
+    build: .
+    image: personal-workbench:latest
+    container_name: workbench
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+      ADDR: ":8080"
+      DB_PATH: /app/data/workbench.db
+      STATIC_DIR: /app/web
+      # 生产环境务必修改
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASS: ${ADMIN_PASS:-admin123}
+      JWT_SECRET: ${JWT_SECRET:-}
+      TOKEN_TTL_HOURS: ${TOKEN_TTL_HOURS:-168}
+    volumes:
+      - ./data:/app/data
+    # 不暴露到公网：由 cloudflared 通过内部网络访问
+    expose:
+      - "8080"
+    networks:
+      - wb
+
+  # Cloudflare Tunnel：主动外连，源站无需开放任何入站端口
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: workbench-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    depends_on:
+      - workbench
+    networks:
+      - wb
+
+networks:
+  wb:
+    driver: bridge
