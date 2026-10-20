@@ -1,0 +1,29 @@
+# 构建上下文排除项，避免把数据与密钥送进构建缓存
+
+# 运行时数据（数据库、JWT 密钥）
+**/data/
+*.db
+*.db-shm
+*.db-wal
+.jwt_secret
+
+# 依赖与产物
+**/node_modules/
+**/dist/
+**/bin/
+*.tsbuildinfo
+
+# 本地配置
+.env
+.env.*
+!.env.example
+
+# git 与编辑器
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# CI 与文档（镜像内不需要）
+.github/
+*.md

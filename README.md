@@ -51,6 +51,28 @@ pnpm dev                     # http://localhost:5173，已配置 /api 代理
 
 **前提**：一台有 Docker 的服务器，域名已托管在 Cloudflare。
 
+### 0. 拉取预构建镜像（推荐）
+
+GitHub Actions 会在推送到 `main` 或打 `v*` 标签时自动构建多架构镜像并推送到 GHCR：
+
+```bash
+# 镜像地址（小写）
+docker pull ghcr.io/weihebai/personal-workbench:latest
+```
+
+支持的标签：
+
+| 标签 | 触发条件 |
+|---|---|
+| `latest` | 推送到 `main` |
+| `main` | 推送到 `main` |
+| `1.2.3` / `1.2` | 打 `v1.2.3` 标签 |
+
+> 首次拉取私有包需登录：`echo $GITHUB_TOKEN \| docker login ghcr.io -u <用户名> --password-stdin`
+
+用预构建镜像部署时，把 `docker-compose.yml` 里的 `build: .` 删掉、
+改为 `image: ghcr.io/weihebai/personal-workbench:latest` 即可，其余不变。
+
 ### 1. 创建 Tunnel
 
 Cloudflare Zero Trust → Networks → Tunnels → 创建隧道 → 复制 Token。

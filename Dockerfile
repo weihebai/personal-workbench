@@ -1,5 +1,11 @@
+# 不使用 # syntax 指令：未使用 BuildKit 专有语法，
+# 走内置 frontend 可避免构建时额外拉取 docker/dockerfile 镜像（国内网络常被墙）。
+# 如需 RUN --mount=type=cache 等特性，再补回该指令。
+
 # ---------- 前端构建 ----------
-FROM node:24-alpine AS web
+# 用 BUILDPLATFORM：前端产物与架构无关，只在构建机上跑一次，
+# 避免多架构构建时在 QEMU 模拟下重复构建前端。
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 WORKDIR /web
 RUN corepack enable
 COPY frontend/package.json frontend/pnpm-lock.yaml* ./
@@ -8,12 +14,16 @@ COPY frontend/ ./
 RUN pnpm build
 
 # ---------- 后端构建 ----------
-FROM golang:1.27-alpine AS api
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS api
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/workbench ./cmd/server
+# TARGETOS/TARGETARCH 由 buildx 注入，交叉编译出目标架构的二进制
+ARG TARGETOS
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/workbench ./cmd/server
 
 # ---------- 运行镜像 ----------
 FROM alpine:3.20
