@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
     "@tanstack/react-query": "^5.104.4",
     "axios": "^1.20.0",
     "class-variance-authority": "^0.7.1",

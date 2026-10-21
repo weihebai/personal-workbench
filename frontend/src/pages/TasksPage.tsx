@@ -1,5 +1,19 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  MouseSensor,
+  TouchSensor,
+  closestCorners,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type KeyboardCoordinateGetter,
+} from '@dnd-kit/core'
 import {
   Plus,
   Search,
@@ -45,6 +59,57 @@ const COLUMNS: { key: Task['status']; label: string; accent: string }[] = [
   { key: 'done', label: '已完成', accent: 'bg-emerald-500' },
 ]
 
+const COLUMN_LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label])) as Record<string, string>
+
+// 键盘拖拽默认每次只挪 25px，跨一列要按二十几下，等于没用。
+// 这里改成「左右（或上下）方向键直接跳到相邻列」，三次按键就能从待办拖到已完成。
+const jumpToColumn: KeyboardCoordinateGetter = (event, { context: { collisionRect }, currentCoordinates }) => {
+  if (!collisionRect) return undefined
+  const colRects = COLUMNS.map((c) => document.getElementById(`col-${c.key}`)?.getBoundingClientRect()).filter(
+    (r): r is DOMRect => !!r,
+  )
+  if (colRects.length < 2) return undefined
+
+  // 桌面端三列并排（左右键），手机端纵向堆叠（上下键），按实际布局决定用哪组键
+  const horizontal = colRects[1].left > colRects[0].left + 10
+  const next = horizontal ? 'ArrowRight' : 'ArrowDown'
+  const prev = horizontal ? 'ArrowLeft' : 'ArrowUp'
+  const dir = event.code === next ? 1 : event.code === prev ? -1 : 0
+  if (!dir) return undefined
+
+  const centerX = collisionRect.left + collisionRect.width / 2
+  const centerY = collisionRect.top + collisionRect.height / 2
+  const cur = colRects.findIndex((r) =>
+    horizontal ? centerX >= r.left && centerX <= r.right : centerY >= r.top && centerY <= r.bottom,
+  )
+  if (cur < 0) return undefined
+  const target = colRects[cur + dir]
+  if (!target) return undefined // 已经在首尾列，不越界
+
+  // 只移动换列所需的那个轴，另一个轴保持不动，避免卡片在屏幕上乱跳
+  if (horizontal) {
+    return { x: currentCoordinates.x + (target.left + target.width / 2 - centerX), y: currentCoordinates.y }
+  }
+  return { x: currentCoordinates.x, y: currentCoordinates.y + (target.top + target.height / 2 - centerY) }
+}
+
+// 键盘拖拽时给屏幕阅读器的播报，让「拿起/移动/放下」有反馈
+const ANNOUNCEMENTS = {
+  onDragStart({ active }: { active: { id: string | number } }) {
+    const el = document.querySelector(`[data-task-title="${active.id}"]`)
+    return `已拿起任务${el?.textContent ?? ''}，用方向键移动到目标列，按空格放下`
+  },
+  onDragOver({ over }: { over: { id: string | number } | null }) {
+    return over ? `移动到${COLUMN_LABEL[String(over.id)] ?? '未知列'}` : '不在任何列上'
+  },
+  onDragEnd({ over }: { over: { id: string | number } | null }) {
+    return over ? `已放到${COLUMN_LABEL[String(over.id)]}` : '已取消'
+  },
+  onDragCancel() {
+    return '已取消拖拽'
+  },
+}
+
 export default function TasksPage() {
   const [q, setQ] = useState('')
   const [priority, setPriority] = useState('')
@@ -52,14 +117,7 @@ export default function TasksPage() {
   const [view, setView] = useState<'board' | 'list'>('board')
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
-  const [dragId, setDragId] = useState<number | null>(null)
-  const [hoverCol, setHoverCol] = useState<Task['status'] | null>(null)
-  const [ghost, setGhost] = useState<{ x: number; y: number; title: string } | null>(null)
-  const colRefs = useRef<Record<string, HTMLDivElement | null>>({})
-  const dragInfo = useRef<{ task: Task; startX: number; startY: number; active: boolean; pointerId: number } | null>(
-    null,
-  )
-  const justDragged = useRef(false)
+  const [activeId, setActiveId] = useState<number | null>(null)
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
@@ -96,75 +154,27 @@ export default function TasksPage() {
     return g
   }, [items])
 
-  // 指针落在哪一列。用列容器的矩形判断，比 elementFromPoint 更稳，
-  // 因为拖动时鼠标下方可能是卡片本身而不是列容器。
-  const columnAt = (x: number, y: number): Task['status'] | null => {
-    for (const col of COLUMNS) {
-      const el = colRefs.current[col.key]
-      if (!el) continue
-      const r = el.getBoundingClientRect()
-      if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return col.key
+  // 三种输入各配一个传感器：
+  // - 鼠标：移动 5px 才激活，保证点击勾选框/编辑按钮仍是普通点击
+  // - 触摸：长按 180ms 才激活，且必须按在手柄上（见下面的 touch 守卫）
+  // - 键盘：空格拿起、方向键换列、空格放下
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: jumpToColumn }),
+  )
+
+  const activeTask = activeId ? items.find((t) => t.id === activeId) ?? null : null
+
+  const handleDragEnd = (e: DragEndEvent) => {
+    setActiveId(null)
+    const overId = e.over?.id
+    if (!overId) return
+    const task = items.find((t) => t.id === e.active.id)
+    const target = overId as Task['status']
+    if (task && COLUMNS.some((c) => c.key === target) && task.status !== target) {
+      patch.mutate({ id: task.id, body: { status: target } })
     }
-    return null
-  }
-
-  // 用 pointer 事件自己实现拖拽，而不是 HTML5 drag：
-  // 1) 原生的 draggable 在触摸屏上根本不触发，手机上没法拖
-  // 2) 原生没有拖动残影和目标列高亮，用户会以为拖不动
-  const startDrag = (e: React.PointerEvent, task: Task) => {
-    // 触摸/手写笔必须从手柄开始拖，否则和列表滚动抢手势
-    const fromHandle = !!(e.target as HTMLElement).closest('[data-drag-handle]')
-    if (e.pointerType !== 'mouse' && !fromHandle) return
-    if (e.button !== 0) return
-
-    const startX = e.clientX
-    const startY = e.clientY
-    const info = { task, startX, startY, active: false, pointerId: e.pointerId }
-    dragInfo.current = info
-
-    const cleanup = () => {
-      dragInfo.current = null
-      setDragId(null)
-      setHoverCol(null)
-      setGhost(null)
-      document.body.classList.remove('select-none')
-      window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', up)
-      window.removeEventListener('pointercancel', cancel)
-    }
-
-    const move = (ev: PointerEvent) => {
-      if (!dragInfo.current || ev.pointerId !== info.pointerId) return
-      if (!info.active) {
-        // 超过 5px 才算拖拽，否则仍然是一次普通点击（勾选框、编辑按钮要能用）
-        if (Math.hypot(ev.clientX - startX, ev.clientY - startY) < 5) return
-        info.active = true
-        setDragId(task.id)
-        document.body.classList.add('select-none')
-      }
-      setGhost({ x: ev.clientX, y: ev.clientY, title: task.title })
-      setHoverCol(columnAt(ev.clientX, ev.clientY))
-    }
-
-    const up = (ev: PointerEvent) => {
-      if (ev.pointerId !== info.pointerId) return
-      const target = columnAt(ev.clientX, ev.clientY)
-      const moved = info.active
-      cleanup()
-      if (!moved) return
-      // 拖完会紧接着触发一次 click，屏蔽掉，避免误触勾选框
-      justDragged.current = true
-      setTimeout(() => (justDragged.current = false), 150)
-      if (target && target !== task.status) {
-        patch.mutate({ id: task.id, body: { status: target } })
-      }
-    }
-
-    const cancel = () => cleanup()
-
-    window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', up)
-    window.addEventListener('pointercancel', cancel)
   }
 
   const overdueCount = items.filter((t) => t.dueState === 'overdue').length
@@ -235,58 +245,41 @@ export default function TasksPage() {
           />
         </Card>
       ) : view === 'board' ? (
-        <div className="grid items-start gap-2.5 lg:grid-cols-3">
-          {COLUMNS.map((col) => {
-            const isHover = dragId !== null && hoverCol === col.key
-            return (
-              <div
-                key={col.key}
-                ref={(el) => {
-                  colRefs.current[col.key] = el
-                }}
-                className={cn(
-                  // min-h 保证空列也有足够的落点区域，否则空列只有标题那点高度，
-                  // 往下一拖就落到列外，看起来像「拖不进去」
-                  'flex min-h-[200px] flex-col rounded-xl p-1.5 transition-colors',
-                  isHover ? 'bg-brand-100 ring-2 ring-brand-400' : 'bg-ink-100/60',
-                )}
-              >
-                <div className="flex items-center gap-1.5 px-1.5 py-1.5">
-                  <span className={cn('dot', col.accent)} />
-                  <span className="text-[11px] font-semibold text-ink-700">{col.label}</span>
-                  <span className="tabular text-[10px] text-ink-400">{grouped[col.key]?.length ?? 0}</span>
-                  {isHover && <span className="ml-auto text-[10px] font-medium text-brand-600">松手放到这里</span>}
-                </div>
-                <div className="flex-1 space-y-1.5">
-                  {(grouped[col.key] ?? []).map((t) => (
-                    <TaskCard
-                      key={t.id}
-                      task={t}
-                      dragging={dragId === t.id}
-                      onPointerDown={(e) => startDrag(e, t)}
-                      suppressClick={() => justDragged.current}
-                      onToggle={() =>
-                        patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
-                      }
-                      onEdit={() => setEditing(t)}
-                      onDelete={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
-                    />
-                  ))}
-                  {(grouped[col.key] ?? []).length === 0 && (
-                    <p
-                      className={cn(
-                        'px-2 py-12 text-center text-[11px]',
-                        isHover ? 'font-medium text-brand-600' : 'text-ink-400',
-                      )}
-                    >
-                      {isHover ? '松手放到这里' : '拖拽任务到这里'}
-                    </p>
-                  )}
-                </div>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCorners}
+          onDragStart={(e) => setActiveId(e.active.id as number)}
+          onDragCancel={() => setActiveId(null)}
+          onDragEnd={handleDragEnd}
+          accessibility={{ announcements: ANNOUNCEMENTS }}
+        >
+          <div className="grid items-start gap-2.5 lg:grid-cols-3">
+            {COLUMNS.map((col) => (
+              <BoardColumn key={col.key} col={col} count={grouped[col.key]?.length ?? 0}>
+                {(grouped[col.key] ?? []).map((t) => (
+                  <TaskCard
+                    key={t.id}
+                    task={t}
+                    onToggle={() =>
+                      patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
+                    }
+                    onEdit={() => setEditing(t)}
+                    onDelete={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
+                  />
+                ))}
+              </BoardColumn>
+            ))}
+          </div>
+
+          {/* 拖动时跟着指针走的那张卡，用真实卡片渲染，不是黑块 */}
+          <DragOverlay dropAnimation={null}>
+            {activeTask ? (
+              <div className="rotate-1 opacity-95 shadow-xl">
+                <TaskCard task={activeTask} overlay onToggle={() => {}} onEdit={() => {}} onDelete={() => {}} />
               </div>
-            )
-          })}
-        </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       ) : (
         <Card padding={false} className="overflow-hidden">
           <table className="w-full text-xs">
@@ -374,32 +367,61 @@ export default function TasksPage() {
         />
       )}
 
-      {/* 拖动残影：跟着指针走，让用户清楚自己正在拖哪一条 */}
-      {ghost && (
-        <div
-          className="pointer-events-none fixed z-50 max-w-64 truncate rounded-md bg-ink-900/90 px-2 py-1 text-[11px] font-medium text-white shadow-lg"
-          style={{ left: ghost.x + 12, top: ghost.y + 12 }}
-        >
-          {ghost.title}
-        </div>
+      {/* 拖动残影交给 dnd-kit 的 DragOverlay，这里不再手写 */}
+    </div>
+  )
+}
+
+// 一列 = 一个可放置区。整列都是落点，所以往列内任何位置松手都算，
+// 不需要精确对准某张卡片。
+function BoardColumn({
+  col,
+  count,
+  children,
+}: {
+  col: (typeof COLUMNS)[number]
+  count: number
+  children: React.ReactNode
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: col.key })
+  return (
+    <div
+      ref={setNodeRef}
+      id={`col-${col.key}`}
+      className={cn(
+        // min-h 保证空列也有足够的落点区域，否则空列只有标题那点高度
+        'flex min-h-[200px] flex-col rounded-xl p-1.5 transition-colors',
+        isOver ? 'bg-brand-100 ring-2 ring-brand-400' : 'bg-ink-100/60',
       )}
+    >
+      <div className="flex items-center gap-1.5 px-1.5 py-1.5">
+        <span className={cn('dot', col.accent)} />
+        <span className="text-[11px] font-semibold text-ink-700">{col.label}</span>
+        <span className="tabular text-[10px] text-ink-400">{count}</span>
+        {isOver && <span className="ml-auto text-[10px] font-medium text-brand-600">松手放到这里</span>}
+      </div>
+      <div className="flex-1 space-y-1.5">
+        {children}
+        {count === 0 && (
+          <p className={cn('px-2 py-12 text-center text-[11px]', isOver ? 'font-medium text-brand-600' : 'text-ink-400')}>
+            {isOver ? '松手放到这里' : '拖拽任务到这里'}
+          </p>
+        )}
+      </div>
     </div>
   )
 }
 
 function TaskCard({
   task,
-  dragging,
-  onPointerDown,
-  suppressClick,
+  overlay,
   onToggle,
   onEdit,
   onDelete,
 }: {
   task: Task
-  dragging?: boolean
-  onPointerDown?: (e: React.PointerEvent) => void
-  suppressClick?: () => boolean
+  /** 拖动时的那份副本：不参与拖拽逻辑，按钮也不可点 */
+  overlay?: boolean
   onToggle: () => void
   onEdit: () => void
   onDelete: () => void
@@ -409,21 +431,32 @@ function TaskCard({
   const soon = task.dueState === 'soon'
   const done = task.status === 'done'
 
+  // 整张卡都是拖拽激活区。鼠标靠 5px 位移阈值、触摸靠 180ms 长按来区分
+  // 「点击」和「拖动」，所以里面的勾选框和编辑按钮照常可用。
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: task.id,
+    disabled: overlay,
+  })
+
   return (
     <div
-      onPointerDown={onPointerDown}
-      onClickCapture={(e) => {
-        if (suppressClick?.()) {
-          e.stopPropagation()
-          e.preventDefault()
-        }
+      ref={overlay ? undefined : setNodeRef}
+      {...(overlay ? {} : attributes)}
+      {...(overlay ? {} : listeners)}
+      // 手指的拖拽只允许从手柄发起：dnd-kit 的触摸拖拽要求元素 touch-action:none，
+      // 但整张卡都设成 none 的话，手机上就没法上下滚动任务列表了。
+      // 所以在捕获阶段拦掉「不是从手柄开始」的触摸，让浏览器照常滚动。
+      onTouchStartCapture={(e) => {
+        if (overlay) return
+        if (!(e.target as HTMLElement).closest('[data-drag-handle]')) e.stopPropagation()
       }}
       className={cn(
         'group rounded-lg border bg-white p-2.5 shadow-sm transition-all',
-        dragging
+        isDragging
           ? 'border-brand-300 opacity-40 ring-2 ring-brand-200'
           : 'border-[var(--border)] hover:border-ink-300',
-        done && !dragging && 'opacity-60',
+        !overlay && 'cursor-grab active:cursor-grabbing',
+        done && !isDragging && 'opacity-60',
       )}
     >
       <div className="flex items-start gap-1.5">
@@ -433,18 +466,24 @@ function TaskCard({
           onChange={onToggle}
           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-emerald-500"
         />
-        <p className={cn('flex-1 text-xs font-medium leading-snug', done && 'text-ink-400 line-through')}>
+        <p
+          data-task-title={task.id}
+          className={cn('flex-1 text-xs font-medium leading-snug', done && 'text-ink-400 line-through')}
+        >
           {task.title}
         </p>
-        {/* 拖拽手柄：鼠标可从整张卡拖动，触摸屏必须从手柄拖（避免和滚动抢手势）。
-            常驻显示，顺带告诉用户「这张卡是可以拖的」。 */}
-        <span
+        {/* 手柄：鼠标可以从整张卡拖，手指必须按这里。
+            常驻显示，顺带告诉用户「这张卡是可以拖的」。
+            touch-none 是 dnd-kit 触摸拖拽的必要条件，只能加在手柄上。 */}
+        <button
+          type="button"
           data-drag-handle
           title="拖动改变状态"
+          aria-label="拖动改变状态"
           className="shrink-0 cursor-grab touch-none rounded p-0.5 text-ink-300 transition-colors hover:bg-ink-100 hover:text-ink-500 active:cursor-grabbing"
         >
           <GripVertical size={12} />
-        </span>
+        </button>
         <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onEdit}>
             <Pencil size={11} />
