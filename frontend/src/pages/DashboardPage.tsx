@@ -107,7 +107,8 @@ export default function DashboardPage() {
           label="预估利润"
           value={money(f.profit)}
           tone="brand"
-          hint={`已收 - 成本 ${money(f.cost, false)}`}
+          // 把公式写出来，省得用户猜这个数字是怎么来的
+          hint={`净合同额 ${money(f.netQuote, false)} − 成本 ${money(f.cost, false)}`}
         />
         <StatCard
           icon={<FolderKanban size={14} />}

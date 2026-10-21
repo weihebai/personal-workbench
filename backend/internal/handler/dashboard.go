@@ -199,8 +199,12 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		"finance": gin.H{
 			"quote": fin.Quote, "cost": fin.Cost, "received": fin.Received,
 			"pending": fin.Pending,
-			// 利润 = 已收 - 成本（已收是扣完抽成实际到账的钱，故不再减抽成）
-			"profit": fin.Received - fin.Cost,
+			// 预估利润 = 净合同额 - 成本：手上所有项目全做完能赚多少。
+			// 原来算的是「已收 - 成本」，那是已实现利润，跟「预估」名不符实，
+			// 而且成本按项目全量算、收入只算已到账，两头口径不一致。
+			"profit": fin.Quote - commission - fin.Cost,
+			// 已实现利润 = 已收 - 成本：真正落袋的部分，给卡片做副标题用
+			"profitRealized": fin.Received - fin.Cost,
 			// 净合同额 = 合同额 - 抽成
 			"commission": commission,
 			"netQuote":   fin.Quote - commission,

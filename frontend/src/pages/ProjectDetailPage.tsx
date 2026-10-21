@@ -153,7 +153,11 @@ export default function ProjectDetailPage() {
           <Metric label="合同金额" value={money(p.quote)} />
           <Metric label="已收" value={money(p.received)} tone="emerald" />
           <Metric label="待收" value={money(remain > 0 ? remain : 0)} tone="amber" />
-          <Metric label="成本 / 毛利" value={`${money(p.cost, false)} / ${money(p.received - p.cost, false)}`} />
+          {/* 毛利按净额算：成本是为拿下净额花的，拿含抽成的合同额去减会把抽成算成利润 */}
+          <Metric
+            label="成本 / 毛利"
+            value={`${money(p.cost, false)} / ${money((p.netQuote ?? p.quote) - p.cost, false)}`}
+          />
         </div>
 
         {/* 中介抽成 */}

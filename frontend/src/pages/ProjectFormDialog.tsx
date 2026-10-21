@@ -227,7 +227,7 @@ export function ProjectFormDialog({
           <Field label="合同金额" hint="客户付的全款">
             <Input value={form.quote} onChange={set('quote')} inputMode="decimal" placeholder="0" />
           </Field>
-          <Field label="成本">
+          <Field label="成本" hint="你实际掏的钱：服务器/域名/认证/外包素材，不算自己的工时">
             <Input value={form.cost} onChange={set('cost')} inputMode="decimal" placeholder="0" />
           </Field>
           <Field label="开始日期">

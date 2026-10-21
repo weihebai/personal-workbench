@@ -187,7 +187,10 @@ export interface DashboardData {
     cost: number
     received: number
     pending: number
+    /** 预估利润 = 净合同额 - 成本 */
     profit: number
+    /** 已实现利润 = 已收 - 成本 */
+    profitRealized: number
     unreceived: number
     /** 中介抽成总额 */
     commission: number
