@@ -23,9 +23,10 @@ export default function PaymentsPage() {
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['payments', status],
-    queryFn: async () =>
-      (await api.get<Paged<Payment>>('/payments', { params: { status, size: 200 } })).data,
+    queryKey: ['payments'],
+    // 一次取全量（个人应用量级很小），状态筛选放本地做，
+    // 这样「已逾期」才能同时覆盖手动标 overdue 和按约定日算出来的逾期
+    queryFn: async () => (await api.get<Paged<Payment>>('/payments', { params: { size: 500 } })).data,
   })
 
   const { data: projects } = useQuery({
@@ -52,10 +53,20 @@ export default function PaymentsPage() {
     },
   })
 
-  const items = (data?.items ?? []).filter((p) =>
-    q ? projName(p.projectId).includes(q) || p.title.includes(q) : true,
+  // 逾期有两种来源：手动标成 overdue 的，以及约定日已过但状态还是 pending 的
+  const isLate = (p: Payment) => p.status === 'overdue' || !!p.overdue
+  const matchStatus = (p: Payment) => {
+    if (!status) return true
+    if (status === 'overdue') return isLate(p)
+    if (status === 'pending') return p.status === 'pending' && !p.overdue
+    return p.status === status
+  }
+  const items = (data?.items ?? []).filter(
+    (p) => matchStatus(p) && (q ? projName(p.projectId).includes(q) || p.title.includes(q) : true),
   )
-  const sum = (s: string) => items.filter((p) => p.status === s).reduce((a, b) => a + b.amount, 0)
+  const sumWhere = (f: (p: Payment) => boolean) =>
+    items.filter(f).reduce((a, b) => a + b.amount, 0)
+  const sum = (s: string) => sumWhere((p) => p.status === s && !p.overdue)
 
   return (
     <div>
@@ -72,7 +83,7 @@ export default function PaymentsPage() {
       <div className="mb-3 grid grid-cols-3 gap-2">
         <SummaryCard label="待收" value={money(sum('pending'))} tone="amber" />
         <SummaryCard label="已收" value={money(sum('received'))} tone="emerald" />
-        <SummaryCard label="逾期" value={money(sum('overdue'))} tone="red" />
+        <SummaryCard label="逾期" value={money(sumWhere(isLate))} tone="red" />
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -122,7 +133,14 @@ export default function PaymentsPage() {
                       {projName(p.projectId)}
                     </td>
                     <td className="tabular px-2 py-2 text-right font-bold text-ink-900">{money(p.amount)}</td>
-                    <td className="tabular hidden px-2 py-2 text-ink-500 md:table-cell">{fmtDate(p.planDate)}</td>
+                    <td className="tabular hidden px-2 py-2 text-ink-500 md:table-cell">
+                      {fmtDate(p.planDate)}
+                      {p.overdue && (
+                        <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
+                          逾期 {p.daysLate} 天
+                        </span>
+                      )}
+                    </td>
                     <td className="tabular hidden px-2 py-2 text-ink-500 md:table-cell">{fmtDate(p.paidDate)}</td>
                     <td className="px-2 py-2">
                       <Badge soft={ps.soft} dot={ps.color}>

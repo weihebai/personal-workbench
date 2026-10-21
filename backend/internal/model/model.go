@@ -87,12 +87,17 @@ type Project struct {
 type Payment struct {
 	Base
 	ProjectID  uint       `gorm:"index;not null" json:"projectId"`
-	Title      string     `gorm:"size:128" json:"title"` // 首款/中期款/尾款
+	Title      string     `gorm:"size:128" json:"title"` // 首款/中期款/尾款/中介结款
 	Amount     float64    `json:"amount"`
 	Status     string     `gorm:"size:16;index" json:"status"` // pending 待收 / received 已收 / overdue 已逾期
 	PlanDate   *time.Time `json:"planDate"`   // 约定收款日
 	PaidDate   *time.Time `json:"paidDate"`   // 实际到账日
 	Note       string     `gorm:"size:512" json:"note"`
+
+	// 只读派生字段：约定日已过但还没到账时由后端算出来，前端不用自己判断
+	Overdue    bool   `gorm:"-" json:"overdue"`
+	DaysLate   int    `gorm:"-" json:"daysLate"`
+	ProjectName string `gorm:"-" json:"projectName"`
 }
 
 // 任务

@@ -450,6 +450,49 @@ func (h *Handler) syncTags(target string, targetID uint, tags []string) {
 
 // ---------- 收款 ----------
 
+// 派生收款状态：约定日已过且还没到账 → 逾期。
+// 「中介说下个月结」这类口头约定，到点没到账必须能一眼看出来，
+// 否则只能靠人记性，这正是这个功能存在的意义。
+func decoratePayments(items []model.Payment) {
+	today := time.Now()
+	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
+	for i := range items {
+		p := &items[i]
+		if p.Status == "received" || p.PlanDate == nil {
+			continue
+		}
+		plan := time.Date(p.PlanDate.Year(), p.PlanDate.Month(), p.PlanDate.Day(), 0, 0, 0, 0, today.Location())
+		if plan.Before(today) {
+			p.Overdue = true
+			p.DaysLate = int(today.Sub(plan).Hours() / 24)
+		}
+	}
+}
+
+// 给收款记录补上项目名，列表页不用再单独查项目
+func (h *Handler) fillPaymentProjectNames(items []model.Payment) {
+	ids := make([]uint, 0, len(items))
+	seen := map[uint]bool{}
+	for _, p := range items {
+		if !seen[p.ProjectID] {
+			seen[p.ProjectID] = true
+			ids = append(ids, p.ProjectID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	var projects []model.Project
+	h.DB.Select("id", "name").Where("id IN ?", ids).Find(&projects)
+	names := make(map[uint]string, len(projects))
+	for _, pr := range projects {
+		names[pr.ID] = pr.Name
+	}
+	for i := range items {
+		items[i].ProjectName = names[items[i].ProjectID]
+	}
+}
+
 func (h *Handler) ListPayments(c *gin.Context) {
 	page, size := paginate(c)
 	q := h.DB.Model(&model.Payment{})
@@ -466,6 +509,8 @@ func (h *Handler) ListPayments(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
+	decoratePayments(items)
+	h.fillPaymentProjectNames(items)
 	c.JSON(http.StatusOK, paginated(items, total, page, size))
 }
 

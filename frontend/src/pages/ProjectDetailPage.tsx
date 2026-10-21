@@ -62,6 +62,8 @@ export default function ProjectDetailPage() {
   const qc = useQueryClient()
   const [editing, setEditing] = useState(false)
   const [payDialog, setPayDialog] = useState<Payment | null | undefined>(undefined)
+  // 中介结款的快捷录入（预填标题和净额，只需选日期）
+  const [payQuick, setPayQuick] = useState(false)
   // undefined=关闭, null=新建, 对象=编辑
   const [msDialog, setMsDialog] = useState<Milestone | null | undefined>(undefined)
 
@@ -106,6 +108,9 @@ export default function ProjectDetailPage() {
   const netQuote = p.netQuote ?? p.quote
   const pct = netQuote > 0 ? Math.min(100, (p.received / netQuote) * 100) : 0
   const remain = netQuote - p.received
+  // 走中介的项目：客户把钱付给中介，交付验收后中介一次性结给我。
+  // 这种没有「首款/尾款」的概念，收款引导要跟直客项目区分开。
+  const isBroker = (p.commission ?? 0) > 0
 
   return (
     <div className="space-y-3">
@@ -204,12 +209,27 @@ export default function ProjectDetailPage() {
             <Wallet size={13} className="text-emerald-600" /> 收款安排
             <span className="text-[10px] font-normal text-ink-400">({data.payments.length})</span>
           </h3>
-          <Button size="sm" variant="outline" onClick={() => setPayDialog(null)}>
-            <Plus size={13} /> 添加
-          </Button>
+          {isBroker && data.payments.length === 0 ? (
+            // 空态里已经有「记中介结款」的主按钮，这里不再重复
+            <span className="text-[10px] text-ink-400">走中介</span>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => setPayDialog(null)}>
+              <Plus size={13} /> 添加
+            </Button>
+          )}
         </div>
+
         {data.payments.length === 0 ? (
-          <EmptyState title="还没有收款记录" desc="按分期添加，追踪每笔到账" />
+          isBroker ? (
+            <BrokerEmptyState
+              net={remain}
+              broker={p.broker}
+              onAdd={() => setPayQuick(true)}
+              onDivide={() => setPayDialog(null)}
+            />
+          ) : (
+            <EmptyState title="还没有收款记录" desc="按分期添加，追踪每笔到账" />
+          )
         ) : (
           <table className="w-full text-xs">
             <thead>
@@ -229,7 +249,14 @@ export default function ProjectDetailPage() {
                   <tr key={pay.id} className="border-b border-[var(--border)] last:border-0 hover:bg-ink-50/60">
                     <td className="px-3 py-1.5 font-medium text-ink-900">{pay.title || '—'}</td>
                     <td className="tabular px-2 py-1.5 font-semibold text-ink-900">{money(pay.amount)}</td>
-                    <td className="tabular px-2 py-1.5 text-ink-500">{fmtDate(pay.planDate)}</td>
+                    <td className="tabular px-2 py-1.5 text-ink-500">
+                      {fmtDate(pay.planDate)}
+                      {pay.overdue && (
+                        <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
+                          逾期 {pay.daysLate} 天
+                        </span>
+                      )}
+                    </td>
                     <td className="tabular px-2 py-1.5 text-ink-500">{fmtDate(pay.paidDate)}</td>
                     <td className="px-2 py-1.5">
                       <Badge soft={ps.soft} dot={ps.color}>
@@ -349,6 +376,16 @@ export default function ProjectDetailPage() {
           onClose={() => setPayDialog(undefined)}
         />
       )}
+      {payQuick && (
+        <PaymentFormDialog
+          payment={null}
+          defaultProjectId={p.id}
+          defaultTitle="中介结款"
+          defaultAmount={remain > 0 ? remain : undefined}
+          hintText={`走中介的项目通常就一笔：客户把钱付给中介，你交付验收后中介结给你。填上${p.broker ? `「${p.broker}」` : '中介'}说的结款日期，到点没到账会自动标逾期。`}
+          onClose={() => setPayQuick(false)}
+        />
+      )}
       {msDialog !== undefined && (
         <MilestoneFormDialog
           milestone={msDialog}
@@ -356,6 +393,47 @@ export default function ProjectDetailPage() {
           onClose={() => setMsDialog(undefined)}
         />
       )}
+    </div>
+  )
+}
+
+// 中介项目的收款空态：强调「就一笔」，而不是引导用户去拆分期
+function BrokerEmptyState({
+  net,
+  broker,
+  onAdd,
+  onDivide,
+}: {
+  net: number
+  broker?: string
+  onAdd: () => void
+  onDivide: () => void
+}) {
+  return (
+    <div className="px-3 py-4">
+      <div className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-2.5">
+        <p className="text-[11px] font-semibold text-amber-800">
+          这个项目走中介，通常只有一笔收款
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-500">
+          客户把钱付给{broker ? `「${broker}」` : '中介'}，你开发交付、客户确认收货后，
+          中介再结给你。所以只需要记一条：<b className="text-ink-700">中介欠你多少、说好哪天结</b>。
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={onAdd}>
+            <Plus size={13} /> 记中介结款{net > 0 ? ` ${money(net)}` : ''}
+          </Button>
+          <span className="text-[10px] text-ink-400">
+            金额已按净额填好，只需选个约定日期
+          </span>
+        </div>
+        <button
+          onClick={onDivide}
+          className="mt-2 text-[10px] text-ink-400 underline decoration-dotted hover:text-ink-600"
+        >
+          中介也分几次给？手动添加多笔
+        </button>
+      </div>
     </div>
   )
 }

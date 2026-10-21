@@ -306,8 +306,18 @@ export default function DashboardPage() {
                 to="/payments"
                 className="flex items-center gap-2 rounded-md px-1.5 py-1.5 text-xs hover:bg-ink-50"
               >
-                <span className="dot bg-amber-500" />
+                <span className={cn('dot', p.overdue ? 'bg-red-500' : 'bg-amber-500')} />
                 <span className="truncate text-ink-700">{p.title}</span>
+                {p.overdue && (
+                  <span className="shrink-0 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
+                    逾期 {p.daysLate} 天
+                  </span>
+                )}
+                {!p.overdue && p.projectName && (
+                  <span className="hidden shrink-0 truncate text-[10px] text-ink-400 sm:inline">
+                    {p.projectName}
+                  </span>
+                )}
                 <span className="ml-auto shrink-0 tabular text-[11px] font-semibold text-amber-600">
                   {money(p.amount)}
                 </span>

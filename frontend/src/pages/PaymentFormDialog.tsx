@@ -17,18 +17,24 @@ const STATUS_OPTS: Option[] = Object.entries(PAYMENT_STATUS).map(([v, d]) => ({
 export function PaymentFormDialog({
   payment,
   defaultProjectId,
+  defaultTitle,
+  defaultAmount,
+  hintText,
   onClose,
 }: {
   payment: Payment | null
   defaultProjectId?: number
+  defaultTitle?: string
+  defaultAmount?: number
+  hintText?: string
   onClose: () => void
 }) {
   const qc = useQueryClient()
   const isEdit = !!payment
   const [form, setForm] = useState({
     projectId: String(payment?.projectId ?? defaultProjectId ?? ''),
-    title: payment?.title ?? '',
-    amount: payment?.amount ? String(payment.amount) : '',
+    title: payment?.title ?? defaultTitle ?? '',
+    amount: payment?.amount ? String(payment.amount) : defaultAmount ? String(defaultAmount) : '',
     status: payment?.status ?? 'pending',
     planDate: toDateInput(payment?.planDate),
     paidDate: toDateInput(payment?.paidDate),
@@ -96,6 +102,11 @@ export function PaymentFormDialog({
       }
     >
       <div className="space-y-3.5">
+        {hintText && (
+          <div className="rounded-md border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-sky-700">
+            {hintText}
+          </div>
+        )}
         <Field label="所属项目" required>
           <Select
             value={form.projectId}

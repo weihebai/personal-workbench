@@ -95,6 +95,10 @@ export interface Payment {
   planDate?: string | null
   paidDate?: string | null
   note: string
+  /** 约定日已过但还没到账，由后端按日期算出来 */
+  overdue?: boolean
+  daysLate?: number
+  projectName?: string
 }
 
 export interface Task {
