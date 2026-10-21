@@ -249,6 +249,8 @@ func (h *Handler) DeleteTask(c *gin.Context) {
 	}
 	// 子任务是任务的附属数据，任务删了它们就没有归属了，一起清掉
 	h.DB.Where("task_id = ?", id).Delete(&model.Subtask{})
+	// 图片同理：不留指向已删任务的记录，磁盘文件也一并清
+	h.dropAttachmentsBy("task_id", id)
 	if err := h.DB.Delete(&model.Task{}, id).Error; err != nil {
 		serverErr(c, err)
 		return

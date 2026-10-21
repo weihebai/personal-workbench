@@ -238,9 +238,15 @@ type Setting struct {
 // - 文件按内容哈希命名：同一张图重复上传只占一份空间，多张图也不会重名
 // - 数据库只存 hash/类型/大小：SQLite 不会被二进制撑大，备份和查询都还快
 // - 不用 base64 塞进数据库或 JSON：体积会涨 33%，每次列表查询都要拖着它
+//
+// 一张物理文件可以被多条记录引用（比如同一张参考图挂到两个任务上）。
+// 所以 Hash 不能是唯一索引——那样第二条记录就没法插，只能去改第一条，
+// 结果就是「B 任务上传同一张图，A 任务的图神秘消失」。
+// 删记录时要先看还有没有别的记录引用同一个 hash，没有了才删磁盘文件。
 type Attachment struct {
 	Base
-	Hash string `gorm:"size:64;uniqueIndex;not null" json:"hash"`
+	// 非唯一：多条记录可指向同一个物理文件
+	Hash string `gorm:"size:64;index;not null" json:"hash"`
 	// 原始文件名，仅用于下载时显示
 	Name      string `gorm:"size:255" json:"name"`
 	Mime      string `gorm:"size:128" json:"mime"`

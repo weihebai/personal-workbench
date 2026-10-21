@@ -427,6 +427,8 @@ func (h *Handler) DeleteProject(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
+	// 项目下的图片连同磁盘文件一起清（事务外做，因为要读文件系统）
+	h.dropAttachmentsBy("project_id", id)
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 

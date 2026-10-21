@@ -104,61 +104,61 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 
 	sum := hex.EncodeToString(hash.Sum(nil))
 
-	// 已存在就直接复用，不重复占空间
-	var existing model.Attachment
-	if err := h.DB.Where("hash = ?", sum).First(&existing).Error; err == nil {
-		existing.URL = "/api/attachments/" + existing.Hash + "/raw"
-		// 复用记录时补上新的归属关系
-		updates := map[string]any{}
-		if tid := c.PostForm("taskId"); tid != "" {
-			if id, e := parseUint(tid); e == nil {
-				updates["task_id"] = id
-			}
-		}
-		if pid := c.PostForm("projectId"); pid != "" {
-			if id, e := parseUint(pid); e == nil {
-				updates["project_id"] = id
-			}
-		}
-		if len(updates) > 0 {
-			h.DB.Model(&existing).Updates(updates)
-		}
-		c.JSON(http.StatusOK, existing)
-		return
-	}
-
-	// 落盘：data/uploads/ab/abcdef....jpg
-	rel := filepath.Join(sum[:2], sum+ext)
-	dst := filepath.Join(h.Cfg.UploadDir, rel)
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		serverErr(c, err)
-		return
-	}
-	if err := os.Rename(tmpPath, dst); err != nil {
-		// 跨盘时 Rename 会失败，退化成复制
-		if err := copyFile(tmpPath, dst); err != nil {
-			serverErr(c, err)
-			return
-		}
-	}
-
-	att := model.Attachment{
-		Hash:   sum,
-		Name:   truncate(fh.Filename, 255),
-		Mime:   mime,
-		Size:   size,
-		Width:  cfg.Width,
-		Height: cfg.Height,
-	}
+	// 归属关系
+	var taskID, projectID *uint
 	if tid := c.PostForm("taskId"); tid != "" {
 		if id, e := parseUint(tid); e == nil {
-			att.TaskID = &id
+			taskID = &id
 		}
 	}
 	if pid := c.PostForm("projectId"); pid != "" {
 		if id, e := parseUint(pid); e == nil {
-			att.ProjectID = &id
+			projectID = &id
 		}
+	}
+
+	// 同一张图挂到同一个任务上：直接返回已有记录，避免重复粘贴产生两条一样的
+	var dup model.Attachment
+	dupQ := h.DB.Where("hash = ?", sum)
+	if taskID != nil {
+		dupQ = dupQ.Where("task_id = ?", *taskID)
+	} else if projectID != nil {
+		dupQ = dupQ.Where("project_id = ? AND task_id IS NULL", *projectID)
+	} else {
+		dupQ = dupQ.Where("task_id IS NULL AND project_id IS NULL")
+	}
+	if err := dupQ.First(&dup).Error; err == nil {
+		dup.URL = "/api/attachments/" + dup.Hash + "/raw"
+		c.JSON(http.StatusOK, dup)
+		return
+	}
+
+	// 落盘：data/uploads/ab/abcdef....jpg
+	// 文件已存在就不重复写（内容寻址，同名即同内容）
+	dst := h.filePathFor(sum, ext)
+	if _, statErr := os.Stat(dst); statErr != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			serverErr(c, err)
+			return
+		}
+		if err := os.Rename(tmpPath, dst); err != nil {
+			// 跨盘时 Rename 会失败，退化成复制
+			if err := copyFile(tmpPath, dst); err != nil {
+				serverErr(c, err)
+				return
+			}
+		}
+	}
+
+	att := model.Attachment{
+		Hash:      sum,
+		Name:      truncate(fh.Filename, 255),
+		Mime:      mime,
+		Size:      size,
+		Width:     cfg.Width,
+		Height:    cfg.Height,
+		TaskID:    taskID,
+		ProjectID: projectID,
 	}
 	if err := h.DB.Create(&att).Error; err != nil {
 		serverErr(c, err)
@@ -166,6 +166,11 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 	}
 	att.URL = "/api/attachments/" + att.Hash + "/raw"
 	c.JSON(http.StatusOK, att)
+}
+
+// 磁盘路径：data/uploads/ab/abcdef....jpg（分两级，避免单目录堆几万个文件）
+func (h *Handler) filePathFor(hash, ext string) string {
+	return filepath.Join(h.Cfg.UploadDir, hash[:2], hash+ext)
 }
 
 // GET /api/attachments/raw/:hash   -> 返回图片字节
@@ -184,8 +189,7 @@ func (h *Handler) ServeAttachment(c *gin.Context) {
 	if ext == "" {
 		ext = ".bin"
 	}
-	path := filepath.Join(h.Cfg.UploadDir, hash[:2], hash+ext)
-	f, err := os.Open(path)
+	f, err := os.Open(h.filePathFor(hash, ext))
 	if err != nil {
 		notFound(c, "文件已丢失")
 		return
@@ -223,18 +227,68 @@ func (h *Handler) ListAttachments(c *gin.Context) {
 }
 
 // DELETE /api/attachments/:id
-// 只删数据库记录；磁盘文件按哈希共享，可能被别的记录引用，
-// 所以不在这里删文件（避免删掉别处还在用的图）。
+//
+// 删记录，并在没有任何其他记录引用同一个 hash 时把磁盘文件也删掉。
+// 之前的版本只删记录不删文件，理由是「文件可能被共享」——但当时 hash 上
+// 有唯一索引，共享根本不可能发生，那个理由是错的，结果磁盘只涨不减。
 func (h *Handler) DeleteAttachment(c *gin.Context) {
 	id, ok := paramUint(c, "id")
 	if !ok {
+		return
+	}
+	var att model.Attachment
+	if err := h.DB.First(&att, id).Error; err != nil {
+		notFound(c, "图片不存在")
 		return
 	}
 	if err := h.DB.Delete(&model.Attachment{}, id).Error; err != nil {
 		serverErr(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"ok": true})
+	removed := h.cleanupOrphanFile(att.Hash, att.Mime)
+	c.JSON(http.StatusOK, gin.H{"ok": true, "fileRemoved": removed})
+}
+
+// 如果这个 hash 已经没有任何记录引用了，就把磁盘文件删掉。
+// 返回是否真的删了文件。
+func (h *Handler) cleanupOrphanFile(hash, mime string) bool {
+	var n int64
+	h.DB.Model(&model.Attachment{}).Where("hash = ?", hash).Count(&n)
+	if n > 0 {
+		return false
+	}
+	ext := allowedImageMime[mime]
+	if ext == "" {
+		ext = ".bin"
+	}
+	path := h.filePathFor(hash, ext)
+	if err := os.Remove(path); err != nil {
+		// 文件本来就不在不算错误；这里只记录，不影响接口结果
+		return false
+	}
+	// 顺手清掉空的二级目录，别留一堆空文件夹
+	_ = os.Remove(filepath.Dir(path))
+	return true
+}
+
+// 批量清理：删任务/删项目时把它们名下的附件一起收干净，
+// 否则记录留着一个指向不存在任务的 task_id，文件也永远没人删。
+func (h *Handler) dropAttachmentsBy(field string, id uint) {
+	var list []model.Attachment
+	h.DB.Where(field+" = ?", id).Find(&list)
+	if len(list) == 0 {
+		return
+	}
+	h.DB.Where(field+" = ?", id).Delete(&model.Attachment{})
+	// 去重后逐个检查，避免同一 hash 被检查多次
+	seen := map[string]bool{}
+	for _, a := range list {
+		if seen[a.Hash] {
+			continue
+		}
+		seen[a.Hash] = true
+		h.cleanupOrphanFile(a.Hash, a.Mime)
+	}
 }
 
 func copyFile(src, dst string) error {
