@@ -9,13 +9,16 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
+
+	"personal-workbench/internal/config"
 )
 
 type Handler struct {
-	DB *gorm.DB
+	DB  *gorm.DB
+	Cfg *config.Config
 }
 
-func New(db *gorm.DB) *Handler { return &Handler{DB: db} }
+func New(db *gorm.DB, cfg *config.Config) *Handler { return &Handler{DB: db, Cfg: cfg} }
 
 // ---------- 通用工具 ----------
 
@@ -86,3 +89,24 @@ func mustParseDate(s string) *time.Time {
 }
 
 func isNotFound(err error) bool { return errors.Is(err, gorm.ErrRecordNotFound) }
+
+// JSON 里数字一律解成 float64、字符串解成 string，
+// 局部更新时统一转一下，省得每个 handler 各写一份类型断言。
+func toString(v any) string {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+func toFloat(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	}
+	return 0, false
+}

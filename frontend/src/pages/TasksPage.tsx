@@ -27,6 +27,7 @@ import {
   ListFilter,
   LayoutGrid,
   GripVertical,
+  ListChecks,
 } from 'lucide-react'
 import { api, errMsg, type Paged, type Task } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -498,6 +499,17 @@ function TaskCard({
         <Badge soft={ps.soft} dot={ps.color}>
           {ps.label}
         </Badge>
+        {/* 步骤进度：2/4 这种，让「这条任务推进到哪」在卡片上就能看出来 */}
+        {(task.subtaskTotal ?? 0) > 0 && (
+          <Badge
+            className={cn(
+              'border-ink-200 bg-white',
+              (task.subtaskDone ?? 0) === task.subtaskTotal ? 'text-emerald-600' : 'text-ink-500',
+            )}
+          >
+            <ListChecks size={9} /> {task.subtaskDone}/{task.subtaskTotal}
+          </Badge>
+        )}
         {task.projectName && (
           <Badge className="border-ink-200 bg-white text-ink-500">
             <FolderKanban size={9} /> {task.projectName}

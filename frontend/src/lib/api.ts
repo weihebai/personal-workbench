@@ -121,6 +121,34 @@ export interface Task {
   projectName?: string
   clientName?: string
   createdAt: string
+  /** 子任务清单（只有详情里带，列表只给计数） */
+  subtasks?: Subtask[]
+  subtaskDone?: number
+  subtaskTotal?: number
+}
+
+/** 任务内部的步骤 */
+export interface Subtask {
+  id: number
+  taskId: number
+  title: string
+  done: boolean
+  sort: number
+}
+
+/** 图片附件：文件在服务器磁盘上，这里只有元数据 */
+export interface Attachment {
+  id: number
+  hash: string
+  name: string
+  mime: string
+  size: number
+  width: number
+  height: number
+  taskId?: number | null
+  projectId?: number | null
+  url: string
+  createdAt: string
 }
 
 export interface Reminder {

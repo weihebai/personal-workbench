@@ -71,6 +71,27 @@
 
 ---
 
+### 任务步骤（子任务）
+
+一条任务里常有「上传代码 → 域名访问 → 完善信息 → 测支付」这种分步动作。拆成四个独立任务会丢掉「它们是一件事」的语义，看板也会碎成一堆卡片，所以在任务内部做成勾选清单。
+
+- **卡片上看进度**：显示 `2/4` 徽标，不用点开就知道推到哪了
+- **批量录入**：点列表图标，整段粘贴多行，每行一步。`1. 2.`、`- `、`• `、`✓ ` 这类前缀会自动去掉
+- **就地编辑**：改标题直接点文字改，失焦保存；勾选框单独切换完成
+- 删任务时步骤一起清掉，不留孤儿数据
+
+### 图片附件
+
+截图、参考图直接拖进任务或项目里。
+
+- **存在服务器磁盘**：`data/uploads/<哈希前2位>/<sha256>.<后缀>`，和数据库同一个 `data/` 目录，备份时一个目录全带走，不需要对象存储和密钥
+- **按内容哈希命名**：同一张图传两次只占一份空间
+- **库里只存元数据**：哈希、类型、尺寸、大小。不存 base64——那会让体积涨 33%，列表查询还得拖着二进制
+- **只认真正的图片**：按文件头解码校验，改后缀骗不过去；单张上限 10MB（`MAX_UPLOAD_MB` 可调）
+- **读取不鉴权**：`<img src>` 带不上 Authorization 头，所以读图路由放在鉴权外。安全性靠 256 位内容哈希本身不可枚举——等同一条直达链接，和对象存储的预签名 URL 同理
+
+---
+
 ## 技术栈
 
 - **后端**：Go 1.27 + Gin + GORM + SQLite（单文件，零运维）
@@ -262,6 +283,8 @@ docker compose up -d
 | `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin123` | 仅在库为空时创建 |
 | `JWT_SECRET` | 自动生成 | 留空则生成并保存到 `data/.jwt_secret` |
 | `TOKEN_TTL_HOURS` | `168` | 登录有效期（小时） |
+| `UPLOAD_DIR` | `./data/uploads` | 图片存放目录（和数据库同在 `data/` 下，一起备份） |
+| `MAX_UPLOAD_MB` | `10` | 单张图片大小上限 |
 | `CLOUDFLARE_TUNNEL_TOKEN` | — | Tunnel 令牌 |
 
 ---
@@ -292,6 +315,17 @@ POST   /api/tasks
 PUT    /api/tasks/:id             部分字段更新（看板拖拽用）
 DELETE /api/tasks/:id
 
+GET    /api/tasks/:id/subtasks    任务的步骤清单
+POST   /api/tasks/:id/subtasks    加一步
+POST   /api/tasks/:id/subtasks/bulk  多行文本一次拆成多步
+PUT    /api/subtasks/:id          改标题 / 勾选完成
+DELETE /api/subtasks/:id
+
+POST   /api/attachments           上传图片（multipart: file + taskId?/projectId?）
+GET    /api/attachments           图片列表（按 taskId/projectId 筛）
+GET    /api/attachments/:hash/raw 读取图片（不鉴权，靠哈希不可枚举）
+DELETE /api/attachments/:id       删记录（磁盘文件按哈希共享，不在此删）
+
 GET    /api/reminders             到期提醒
 POST   /api/reminders
 PUT    /api/reminders/:id
@@ -315,6 +349,8 @@ DELETE /api/ideas/:id
 ```
 
 除 `/api/auth/login` 与 `/api/health` 外均需 `Authorization: Bearer <token>`。
+
+唯一例外是 `GET /api/attachments/:hash/raw`：`<img>` 标签由浏览器自己发起请求，带不上自定义请求头，所以读图不校验 JWT。它靠 256 位内容哈希保证不可枚举——猜不到就等于拿不到，和对象存储预签名 URL 同一思路。若要更严，可改成带时效的签名 URL，或把整个站点放进 Cloudflare Access 后面。
 
 ---
 

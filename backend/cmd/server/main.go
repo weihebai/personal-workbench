@@ -62,7 +62,12 @@ func main() {
 
 	mgr := auth.New(cfg.JWTSecret, cfg.TokenTTL)
 	limiter := auth.NewLimiter(5, 10*time.Minute)
-	h := handler.New(db)
+	h := handler.New(db, cfg)
+
+	// 上传目录提前建好，免得第一次传图才报错
+	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
+		log.Fatalf("create upload dir %s: %v", cfg.UploadDir, err)
+	}
 	ah := &handler.AuthHandler{Handler: h, Mgr: mgr, Limiter: limiter, AdminUser: cfg.AdminUser, AdminPass: cfg.AdminPass}
 
 	gin.SetMode(gin.ReleaseMode)
@@ -88,6 +93,12 @@ func main() {
 	api := r.Group("/api")
 	{
 		api.POST("/auth/login", ah.Login)
+
+		// 图片读取必须放在鉴权组外面：<img src> 是浏览器自己发起的请求，
+		// 带不上 Authorization 头，放进 authed 组会一律 401。
+		// 安全性靠哈希本身——它是 256 位内容哈希，猜不出来，
+		// 等同于一条不可枚举的直达链接（和对象存储的预签名 URL 一个道理）。
+		api.GET("/attachments/:hash/raw", h.ServeAttachment)
 
 		authed := api.Group("")
 		authed.Use(mgr.Middleware())
@@ -118,6 +129,18 @@ func main() {
 			authed.POST("/tasks", h.CreateTask)
 			authed.PUT("/tasks/:id", h.UpdateTask)
 			authed.DELETE("/tasks/:id", h.DeleteTask)
+
+			// 子任务（任务内的步骤清单）
+			authed.GET("/tasks/:id/subtasks", h.ListSubtasks)
+			authed.POST("/tasks/:id/subtasks", h.CreateSubtask)
+			authed.POST("/tasks/:id/subtasks/bulk", h.BulkCreateSubtasks)
+			authed.PUT("/subtasks/:id", h.UpdateSubtask)
+			authed.DELETE("/subtasks/:id", h.DeleteSubtask)
+
+			// 图片附件：文件存磁盘，库里只存哈希和元数据
+			authed.POST("/attachments", h.UploadAttachment)
+			authed.GET("/attachments", h.ListAttachments)
+			authed.DELETE("/attachments/:id", h.DeleteAttachment)
 
 			authed.GET("/reminders", h.ListReminders)
 			authed.POST("/reminders", h.CreateReminder)

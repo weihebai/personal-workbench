@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ListChecks, Images } from 'lucide-react'
 import { api, errMsg, type Client, type Project, type Task } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Textarea } from '@/components/ui/Input'
@@ -8,6 +9,8 @@ import { DatePicker } from '@/components/ui/DatePicker'
 import { TASK_PRIORITY, TASK_STATUS } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Layout'
 import { toDateInput } from '@/lib/utils'
+import { SubtaskList } from './SubtaskList'
+import { AttachmentGallery } from './AttachmentGallery'
 
 export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: () => void }) {
   const qc = useQueryClient()
@@ -153,6 +156,31 @@ export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: 
         <Field label="描述">
           <Textarea value={form.desc} onChange={set('desc')} rows={2} />
         </Field>
+
+        {/* 步骤清单：新建时没有任务 id，存完才能挂步骤，所以只在编辑时出现 */}
+        {isEdit && (
+          <div className="rounded-lg border border-[var(--border)] p-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <ListChecks size={13} className="text-ink-400" />
+              <span className="text-xs font-medium text-ink-700">步骤</span>
+              <span className="text-[10px] text-ink-400">一条任务内的分步动作</span>
+            </div>
+            <SubtaskList taskId={task!.id} />
+          </div>
+        )}
+
+        {/* 图片：同样依赖任务 id */}
+        {isEdit && (
+          <div className="rounded-lg border border-[var(--border)] p-2.5">
+            <div className="mb-1.5 flex items-center gap-1.5">
+              <Images size={13} className="text-ink-400" />
+              <span className="text-xs font-medium text-ink-700">图片</span>
+              <span className="text-[10px] text-ink-400">截图、参考图</span>
+            </div>
+            <AttachmentGallery taskId={task!.id} />
+          </div>
+        )}
+
         <Field label="备注">
           <Textarea value={form.note} onChange={set('note')} rows={2} />
         </Field>

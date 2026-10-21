@@ -119,6 +119,22 @@ type Task struct {
 	Budget          float64   `json:"budget"`
 	DoneAt          *time.Time `json:"doneAt"`
 	Note            string    `gorm:"type:text" json:"note"`
+
+	// 只读：子任务进度（不进数据库，查详情/列表时回填）
+	Subtasks      []Subtask `gorm:"-" json:"subtasks,omitempty"`
+	SubtaskDone   int       `gorm:"-" json:"subtaskDone"`
+	SubtaskTotal  int       `gorm:"-" json:"subtaskTotal"`
+}
+
+// 子任务：一个任务内部的步骤清单。
+// 像「上传代码 / 域名访问 / 完善信息 / 测试支付」这种一条任务下的多步动作，
+// 拆成独立任务会丢掉「它们是一件事」的语义，所以放在任务内部当勾选步骤。
+type Subtask struct {
+	Base
+	TaskID uint   `gorm:"index;not null" json:"taskId"`
+	Title  string `gorm:"size:255;not null" json:"title"`
+	Done   bool   `gorm:"index" json:"done"`
+	Sort   int    `json:"sort"`
 }
 
 // 通用到期提醒（证书 / 域名 / 服务器续费 / 客户续费 / 其他）
@@ -215,9 +231,32 @@ type Setting struct {
 	Value string `gorm:"type:text" json:"value"`
 }
 
+// 附件：图片存在磁盘上，这里只存元数据。
+//
+// 存储策略（为什么不用对象存储 / base64）：
+// - 存磁盘、挂在 data/ 卷下：备份数据库就是备份图片，不额外花钱，也不用配密钥
+// - 文件按内容哈希命名：同一张图重复上传只占一份空间，多张图也不会重名
+// - 数据库只存 hash/类型/大小：SQLite 不会被二进制撑大，备份和查询都还快
+// - 不用 base64 塞进数据库或 JSON：体积会涨 33%，每次列表查询都要拖着它
+type Attachment struct {
+	Base
+	Hash string `gorm:"size:64;uniqueIndex;not null" json:"hash"`
+	// 原始文件名，仅用于下载时显示
+	Name      string `gorm:"size:255" json:"name"`
+	Mime      string `gorm:"size:128" json:"mime"`
+	Size      int64  `json:"size"`
+	Width     int    `json:"width"`
+	Height    int    `json:"height"`
+	TaskID    *uint  `gorm:"index" json:"taskId"`
+	ProjectID *uint  `gorm:"index" json:"projectId"`
+	// 只读：访问地址
+	URL string `gorm:"-" json:"url"`
+}
+
 func AllModels() []any {
 	return []any{
 		&User{}, &Client{}, &Project{}, &Payment{}, &Task{},
 		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{}, &Idea{},
+		&Subtask{}, &Attachment{},
 	}
 }

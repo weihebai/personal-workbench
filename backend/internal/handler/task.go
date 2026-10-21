@@ -106,6 +106,16 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		}
 		views = append(views, v)
 	}
+	// 子任务进度（2/4 那种徽标），列表只回填计数不回填清单
+	flat := make([]model.Task, len(views))
+	for i := range views {
+		flat[i] = views[i].Task
+	}
+	h.fillSubtaskProgress(flat)
+	for i := range views {
+		views[i].SubtaskTotal = flat[i].SubtaskTotal
+		views[i].SubtaskDone = flat[i].SubtaskDone
+	}
 	c.JSON(http.StatusOK, paginated(views, total, page, size))
 }
 
@@ -235,6 +245,8 @@ func (h *Handler) DeleteTask(c *gin.Context) {
 	if !ok {
 		return
 	}
+	// 子任务是任务的附属数据，任务删了它们就没有归属了，一起清掉
+	h.DB.Where("task_id = ?", id).Delete(&model.Subtask{})
 	if err := h.DB.Delete(&model.Task{}, id).Error; err != nil {
 		serverErr(c, err)
 		return
