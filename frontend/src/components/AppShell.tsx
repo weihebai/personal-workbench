@@ -59,8 +59,8 @@ export default function AppShell() {
 
   return (
     <div className="flex min-h-screen">
-      {/* 桌面侧栏 */}
-      <aside className="hidden w-56 shrink-0 flex-col border-r border-[var(--border)] bg-white lg:flex">
+      {/* 桌面侧栏：固定不随内容滚动，否则长页面下「设置/退出」会被顶出视野 */}
+      <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-[var(--border)] bg-white lg:flex">
         <div className="flex h-14 items-center gap-2 px-4">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500 text-white shadow-sm shadow-brand-500/30">
             <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -70,7 +70,8 @@ export default function AppShell() {
           <span className="text-sm font-bold tracking-tight text-ink-900">工作台</span>
         </div>
 
-        <nav className="flex-1 space-y-0.5 px-2 py-2">
+        {/* 导航区独立滚动：屏幕很矮时也不会把底部的设置/退出挤出去 */}
+        <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
           {nav.map((item) => {
             const Icon = item.icon
             const active = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)

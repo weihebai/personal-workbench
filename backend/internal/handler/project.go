@@ -296,6 +296,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 
 	var payments []model.Payment
 	h.DB.Where("project_id = ?", id).Order("plan_date ASC").Find(&payments)
+	decoratePayments(payments)
 	var tasks []model.Task
 	h.DB.Where("project_id = ?", id).Order("created_at DESC").Limit(50).Find(&tasks)
 	var client *model.Client
