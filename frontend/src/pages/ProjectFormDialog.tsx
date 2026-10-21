@@ -61,7 +61,8 @@ export function ProjectFormDialog({
     clientId: project?.clientId ? String(project.clientId) : '',
     quote: project?.quote ? String(project.quote) : '',
     cost: project?.cost ? String(project.cost) : '',
-    commissionType: project?.commissionType ?? 'none',
+    // 老数据的 commissionType 可能是空字符串，统一回落到 none，避免下拉框显示空白
+    commissionType: (project?.commissionType || 'none') as 'none' | 'pct' | 'fixed',
     commissionRate: project?.commissionRate ? String(project.commissionRate) : '',
     broker: project?.broker ?? '',
     startDate: toDateInput(project?.startDate),

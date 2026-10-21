@@ -92,9 +92,15 @@ export default function DashboardPage() {
         <StatCard
           icon={<CircleDollarSign size={14} />}
           label="待收金额"
-          value={money(f.pending)}
+          value={money(f.unreceived)}
           tone="amber"
-          hint={f.unreceived > 0 ? `另有 ${money(f.unreceived)} 未收` : '全部已结清'}
+          hint={
+            f.pending > 0
+              ? `其中已排期 ${money(f.pending, false)}`
+              : f.unreceived > 0
+                ? '还没排收款计划'
+                : '全部已结清'
+          }
         />
         <StatCard
           icon={<TrendingUp size={14} />}
@@ -385,7 +391,7 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <QuickLink to="/tasks" icon={<CheckSquare size={15} />} label="新建任务" hint={`${c.todoTasks} 个待办`} />
         <QuickLink to="/projects" icon={<FolderKanban size={15} />} label="项目档案" hint={`${c.projects} 个项目`} />
-        <QuickLink to="/payments" icon={<Wallet size={15} />} label="登记收款" hint={`待收 ${moneyCompact(f.pending)}`} />
+        <QuickLink to="/payments" icon={<Wallet size={15} />} label="登记收款" hint={`待收 ${moneyCompact(f.unreceived)}`} />
         <QuickLink to="/reminders" icon={<BellRing size={15} />} label="到期提醒" hint={`${c.remindersSoon} 项临近`} />
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard,
   FolderKanban,
@@ -13,6 +13,7 @@ import {
   LogOut,
   Menu,
   X,
+  CornerDownLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useEscClose } from '@/lib/useEscClose'
@@ -140,8 +141,11 @@ export default function AppShell() {
           </div>
           <div className="hidden items-center gap-2 rounded-md bg-amber-50 px-2 py-1 lg:flex">
             <span className="dot bg-amber-500" />
-            <span className="tabular text-xs font-semibold text-amber-700">
-              待收 {data ? (data.finance.pending).toLocaleString('zh-CN') : '—'}
+            <span
+              className="tabular text-xs font-semibold text-amber-700"
+              title="净合同额 - 已收，包含还没排收款计划的欠款"
+            >
+              待收 {data ? (data.finance.unreceived).toLocaleString('zh-CN') : '—'}
             </span>
           </div>
 
@@ -252,9 +256,13 @@ function GlobalHotkeys({ onSearch }: { onSearch: () => void }) {
   return null
 }
 
+type SearchHit = { key: string; label: string; sub?: string; to: string }
+
 function SearchOverlay({ onClose }: { onClose: () => void }) {
   const [q, setQ] = useState('')
   const [res, setRes] = useState<any>(null)
+  const [active, setActive] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
   useEscClose(true, onClose)
   const navigate = useNavigate()
 
@@ -270,10 +278,82 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
     return () => clearTimeout(t)
   }, [q])
 
+  // 分组展示，同时摊平成一维列表供键盘上下选择
+  const groups = useMemo<{ title: string; hits: SearchHit[] }[]>(() => {
+    if (!res) return []
+    return [
+      {
+        title: '项目',
+        hits: (res.projects ?? []).map(
+          (p: any): SearchHit => ({ key: `p${p.id}`, label: p.name, sub: p.techStack, to: `/projects/${p.id}` }),
+        ),
+      },
+      {
+        title: '任务',
+        hits: (res.tasks ?? []).map(
+          (t: any): SearchHit => ({ key: `t${t.id}`, label: t.title, to: '/tasks' }),
+        ),
+      },
+      {
+        title: '灵感',
+        hits: (res.ideas ?? []).map(
+          (i: any): SearchHit => ({ key: `i${i.id}`, label: i.title, sub: i.tags, to: '/ideas' }),
+        ),
+      },
+      {
+        title: '提醒',
+        hits: (res.reminders ?? []).map(
+          (r: any): SearchHit => ({ key: `r${r.id}`, label: r.title, to: '/reminders' }),
+        ),
+      },
+      {
+        title: '客户',
+        hits: (res.clients ?? []).map(
+          (c: any): SearchHit => ({ key: `c${c.id}`, label: c.name, sub: c.contact, to: '/clients' }),
+        ),
+      },
+    ].filter((g) => g.hits.length > 0)
+  }, [res])
+
+  const flat = useMemo(() => groups.flatMap((g) => g.hits), [groups])
+
+  // 关键词变了就回到第一条
+  useEffect(() => setActive(0), [q, groups.length])
+
+  // 键盘选中项自动滚进可视区
+  useEffect(() => {
+    const el = listRef.current?.querySelector(`[data-idx="${active}"]`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [active])
+
   const go = (to: string) => {
     onClose()
     navigate(to)
   }
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!flat.length) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setActive((i) => (i + 1) % flat.length)
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setActive((i) => (i - 1 + flat.length) % flat.length)
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const hit = flat[active]
+      if (hit) go(hit.to)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setActive(0)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setActive(flat.length - 1)
+    }
+  }
+
+  const total = flat.length
+  let cursor = -1
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[12vh]">
@@ -285,76 +365,74 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="搜索项目、任务、提醒、客户…"
+            onKeyDown={onKeyDown}
+            placeholder="搜索项目、任务、灵感、提醒、客户…"
             className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-400"
           />
           <button onClick={onClose} className="text-ink-400 hover:text-ink-600">
             <X size={16} />
           </button>
         </div>
-        <div className="max-h-[52vh] overflow-y-auto p-2">
-          {!res && <p className="px-2 py-6 text-center text-xs text-ink-400">输入关键词开始搜索</p>}
-          {res && (
-            <>
-              <SearchGroup<{ id: number; name: string }>
-                title="项目"
-                items={res.projects}
-                onPick={(id) => go(`/projects/${id}`)}
-                render={(p) => p.name}
-              />
-              <SearchGroup<{ id: number; title: string }>
-                title="任务"
-                items={res.tasks}
-                onPick={() => go('/tasks')}
-                render={(t) => t.title}
-              />
-              <SearchGroup<{ id: number; title: string }>
-                title="提醒"
-                items={res.reminders}
-                onPick={() => go('/reminders')}
-                render={(r) => r.title}
-              />
-              <SearchGroup<{ id: number; name: string }>
-                title="客户"
-                items={res.clients}
-                onPick={() => go('/clients')}
-                render={(c) => c.name}
-              />
-              {!res.projects.length && !res.tasks.length && !res.reminders.length && !res.clients.length && (
-                <p className="px-2 py-6 text-center text-xs text-ink-400">没有找到匹配内容</p>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
 
-function SearchGroup<T extends { id: number }>({
-  title,
-  items,
-  onPick,
-  render,
-}: {
-  title: string
-  items: T[]
-  onPick: (id: number) => void
-  render: (item: T) => string
-}) {
-  if (!items?.length) return null
-  return (
-    <div className="mb-1">
-      <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-400">{title}</p>
-      {items.map((it) => (
-        <button
-          key={it.id}
-          onClick={() => onPick(it.id)}
-          className="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm text-ink-700 hover:bg-ink-50"
-        >
-          {render(it)}
-        </button>
-      ))}
+        <div ref={listRef} className="max-h-[52vh] overflow-y-auto p-2">
+          {!res && (
+            <div className="px-2 py-6 text-center">
+              <p className="text-xs text-ink-400">输入关键词开始搜索</p>
+              <p className="mt-1.5 text-[10px] text-ink-300">↑ ↓ 选择 · Enter 打开 · Esc 关闭</p>
+            </div>
+          )}
+
+          {res && total === 0 && <p className="px-2 py-6 text-center text-xs text-ink-400">没有找到匹配内容</p>}
+
+          {res &&
+            groups.map((g) => (
+              <div key={g.title} className="mb-1">
+                <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-ink-400">
+                  {g.title}
+                </p>
+                {g.hits.map((hit) => {
+                  cursor += 1
+                  const idx = cursor
+                  const isActive = idx === active
+                  return (
+                    <button
+                      key={hit.key}
+                      data-idx={idx}
+                      onMouseEnter={() => setActive(idx)}
+                      onClick={() => go(hit.to)}
+                      className={cn(
+                        'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                        isActive ? 'bg-brand-50 text-brand-700' : 'text-ink-700 hover:bg-ink-50',
+                      )}
+                    >
+                      <span className="min-w-0 flex-1 truncate text-sm">{hit.label}</span>
+                      {hit.sub && (
+                        <span className="shrink-0 truncate text-[10px] text-ink-400">{hit.sub}</span>
+                      )}
+                      {isActive && <CornerDownLeft size={11} className="shrink-0 text-brand-400" />}
+                    </button>
+                  )
+                })}
+              </div>
+            ))}
+        </div>
+
+        {total > 0 && (
+          <div className="flex items-center gap-3 border-t border-[var(--border)] px-3 py-1.5 text-[10px] text-ink-400">
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border border-ink-200 px-1">↑</kbd>
+              <kbd className="rounded border border-ink-200 px-1">↓</kbd> 选择
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border border-ink-200 px-1">Enter</kbd> 打开
+            </span>
+            <span className="flex items-center gap-1">
+              <kbd className="rounded border border-ink-200 px-1">Esc</kbd> 关闭
+            </span>
+            <span className="ml-auto">{total} 条结果</span>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

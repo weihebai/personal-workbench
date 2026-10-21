@@ -53,11 +53,14 @@ func (h *Handler) DeleteTag(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// 全局搜索：跨项目 / 任务 / 提醒 / 客户
+// 全局搜索：跨项目 / 任务 / 灵感 / 提醒 / 客户
 func (h *Handler) Search(c *gin.Context) {
 	s := strings.TrimSpace(c.Query("q"))
 	if s == "" {
-		c.JSON(http.StatusOK, gin.H{"projects": []any{}, "tasks": []any{}, "reminders": []any{}, "clients": []any{}})
+		c.JSON(http.StatusOK, gin.H{
+			"projects": []any{}, "tasks": []any{}, "ideas": []any{},
+			"reminders": []any{}, "clients": []any{},
+		})
 		return
 	}
 	like := "%" + s + "%"
@@ -65,11 +68,16 @@ func (h *Handler) Search(c *gin.Context) {
 	h.DB.Where("name LIKE ? OR summary LIKE ? OR tech_stack LIKE ?", like, like, like).Limit(8).Find(&projects)
 	var tasks []model.Task
 	h.DB.Where("title LIKE ? OR note LIKE ?", like, like).Limit(8).Find(&tasks)
+	// 灵感记录：标题、正文、我的想法、标签都参与匹配
+	var ideas []model.Idea
+	h.DB.Where("title LIKE ? OR content LIKE ? OR note LIKE ? OR tags LIKE ?", like, like, like, like).
+		Order("created_at DESC").Limit(6).Find(&ideas)
 	var reminders []model.Reminder
 	h.DB.Where("title LIKE ? OR target LIKE ?", like, like).Limit(8).Find(&reminders)
 	var clients []model.Client
 	h.DB.Where("name LIKE ? OR contact LIKE ?", like, like).Limit(8).Find(&clients)
 	c.JSON(http.StatusOK, gin.H{
-		"projects": projects, "tasks": tasks, "reminders": reminders, "clients": clients,
+		"projects": projects, "tasks": tasks, "ideas": ideas,
+		"reminders": reminders, "clients": clients,
 	})
 }
