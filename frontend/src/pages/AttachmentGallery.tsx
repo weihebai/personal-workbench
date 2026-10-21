@@ -1,6 +1,6 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ImagePlus, X, Loader2 } from 'lucide-react'
+import { ImagePlus, X, Loader2, ClipboardPaste, Check } from 'lucide-react'
 import { api, errMsg, type Attachment } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -13,20 +13,31 @@ import { cn } from '@/lib/utils'
  *   - 备份时 data/ 一个目录把库和图片全带走，不用管对象存储密钥
  *   - 同一张图重复上传只占一份（按内容哈希去重）
  *   - 列表接口不会拖着 base64 大字符串，SQLite 也不会被撑大
+ *
+ * 三种录入方式：
+ *   - 点「加图片」选文件
+ *   - 拖进来
+ *   - Ctrl+V 直接粘截图（最常见的动作：微信/QQ 截完图就粘）
  */
 export function AttachmentGallery({
   taskId,
   projectId,
   readOnly,
+  enablePaste,
 }: {
   taskId?: number
   projectId?: number
   readOnly?: boolean
+  /** 是否监听全局粘贴。同一个页面里只应该有一处开启，否则一次粘贴传两份。 */
+  enablePaste?: boolean
 }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [err, setErr] = useState('')
   const [dragging, setDragging] = useState(false)
+  // 粘贴成功后的浮层提示：图片区在弹窗底部，可能不在视野里，
+  // 没有这个提示用户不知道图到底贴进去没有
+  const [flash, setFlash] = useState('')
 
   const params = taskId ? { taskId } : projectId ? { projectId } : {}
   const enabled = !!(taskId || projectId)
@@ -50,10 +61,18 @@ export function AttachmentGallery({
     },
     onSuccess: () => {
       setErr('')
+      setFlash('图片已添加')
       invalidate()
     },
     onError: (e) => setErr(errMsg(e)),
   })
+
+  // 提示 2 秒后自动消失
+  useEffect(() => {
+    if (!flash) return
+    const t = setTimeout(() => setFlash(''), 2000)
+    return () => clearTimeout(t)
+  }, [flash])
 
   const remove = useMutation({
     mutationFn: async (id: number) => api.delete(`/attachments/${id}`),
@@ -70,6 +89,26 @@ export function AttachmentGallery({
       upload.mutate(f)
     }
   }
+
+  // Ctrl+V 粘贴截图。
+  //
+  // 监听在 window 上而不是这个组件上：用户刚截完图，焦点可能在任何输入框里，
+  // 这时候按 Ctrl+V 期望的是「贴到这张任务上」，不是「贴进标题输入框」。
+  // 但纯文本粘贴要放行，否则会把正常粘标题的行为也吃掉。
+  useEffect(() => {
+    if (!enablePaste || readOnly) return
+    const onPaste = (e: ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+      if (files.length === 0) return
+      // 只有真的带图片才拦截，纯文本照常
+      e.preventDefault()
+      for (const f of files) upload.mutate(f)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+    // upload.mutate 是稳定引用，不需要进依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enablePaste, readOnly, taskId, projectId])
 
   if (!enabled) return null
 
@@ -140,8 +179,22 @@ export function AttachmentGallery({
       />
 
       {err && <p className="mt-1 text-[11px] text-red-600">{err}</p>}
-      {items.length === 0 && !readOnly && (
-        <p className="mt-1 text-[10px] text-ink-400">截图、参考图直接拖进来，存在服务器上，备份跟着数据库走</p>
+      {flash && (
+        <p className="mt-1 flex items-center gap-1 text-[11px] font-medium text-emerald-600">
+          <Check size={11} /> {flash}
+        </p>
+      )}
+      {!readOnly && (
+        <p className="mt-1 flex items-center gap-1 text-[10px] text-ink-400">
+          {enablePaste && (
+            <>
+              <ClipboardPaste size={9} />
+              <kbd className="rounded border border-ink-200 bg-white px-1 font-sans">Ctrl+V</kbd>
+              粘贴截图 ·
+            </>
+          )}
+          拖图片进来也行
+        </p>
       )}
     </div>
   )

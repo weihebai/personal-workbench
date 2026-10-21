@@ -177,7 +177,7 @@ export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: 
               <span className="text-xs font-medium text-ink-700">图片</span>
               <span className="text-[10px] text-ink-400">截图、参考图</span>
             </div>
-            <AttachmentGallery taskId={task!.id} />
+            <AttachmentGallery taskId={task!.id} enablePaste />
           </div>
         )}
 

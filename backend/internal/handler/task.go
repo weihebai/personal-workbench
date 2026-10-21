@@ -106,15 +106,17 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		}
 		views = append(views, v)
 	}
-	// 子任务进度（2/4 那种徽标），列表只回填计数不回填清单
+	// 子任务进度（2/4 那种徽标）。
+	// withSubtasks=1 时连清单一起带回，供卡片直接展开勾选。
 	flat := make([]model.Task, len(views))
 	for i := range views {
 		flat[i] = views[i].Task
 	}
-	h.fillSubtaskProgress(flat)
+	h.fillSubtaskProgress(flat, c.Query("withSubtasks") == "1")
 	for i := range views {
 		views[i].SubtaskTotal = flat[i].SubtaskTotal
 		views[i].SubtaskDone = flat[i].SubtaskDone
+		views[i].Subtasks = flat[i].Subtasks
 	}
 	c.JSON(http.StatusOK, paginated(views, total, page, size))
 }

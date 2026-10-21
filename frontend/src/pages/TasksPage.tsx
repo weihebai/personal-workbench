@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   DndContext,
@@ -28,11 +28,14 @@ import {
   LayoutGrid,
   GripVertical,
   ListChecks,
+  ArrowRight,
+  Copy,
 } from 'lucide-react'
 import { api, errMsg, type Paged, type Task } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Select, type Option } from '@/components/ui/Select'
+import { ContextMenu, useContextMenu, type MenuItem } from '@/components/ui/ContextMenu'
 import { Badge, Card, EmptyState, PageHeader, Skeleton } from '@/components/ui/Layout'
 import {
   cn,
@@ -43,6 +46,7 @@ import {
   TASK_PRIORITY,
 } from '@/lib/utils'
 import { TaskFormDialog } from './TaskFormDialog'
+import { TaskSteps, StepsToggle } from './TaskSteps'
 
 const PRIORITY_FILTER: Option[] = [
   { value: '', label: '全部优先级' },
@@ -119,6 +123,10 @@ export default function TasksPage() {
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
   const [activeId, setActiveId] = useState<number | null>(null)
+  // 哪几张卡的步骤是展开的。默认收起，避免看板被步骤撑得太长。
+  const [openSteps, setOpenSteps] = useState<Set<number>>(new Set())
+  const ctx = useContextMenu()
+  const [ctxTask, setCtxTask] = useState<Task | null>(null)
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
@@ -126,7 +134,9 @@ export default function TasksPage() {
     queryFn: async () =>
       (
         await api.get<Paged<Task>>('/tasks', {
-          params: { q, priority, kind, size: 200, sort: 'due' },
+          // withSubtasks=1：卡片上要能直接展开勾选，一次把步骤带回来，
+          // 比每张卡展开时再各发一个请求省事
+          params: { q, priority, kind, size: 200, sort: 'due', withSubtasks: 1 },
         })
       ).data,
   })
@@ -166,6 +176,71 @@ export default function TasksPage() {
   )
 
   const activeTask = activeId ? items.find((t) => t.id === activeId) ?? null : null
+
+  const toggleSteps = (id: number) =>
+    setOpenSteps((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  // 右键菜单：同一个任务在看板和列表里菜单项一致，省得两处维护两套
+  const openCtx = (e: React.MouseEvent, t: Task) => {
+    setCtxTask(t)
+    ctx.open(e)
+  }
+
+  const ctxItems = useMemo<MenuItem[]>(() => {
+    const t = ctxTask
+    if (!t) return []
+    const hasSteps = (t.subtaskTotal ?? 0) > 0
+    return [
+      {
+        label: '编辑任务',
+        icon: <Pencil size={12} />,
+        hint: '双击',
+        onClick: () => setEditing(t),
+      },
+      {
+        label: hasSteps
+          ? openSteps.has(t.id)
+            ? '收起步骤'
+            : `展开步骤 ${t.subtaskDone}/${t.subtaskTotal}`
+          : '添加步骤',
+        icon: <ListChecks size={12} />,
+        onClick: () => {
+          if (hasSteps) toggleSteps(t.id)
+          else setEditing(t)
+        },
+      },
+      { type: 'separator' },
+      {
+        label: t.status === 'done' ? '标记为未完成' : '标记为已完成',
+        icon: <CheckSquare size={12} />,
+        onClick: () => patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } }),
+      },
+      ...COLUMNS.filter((c) => c.key !== t.status && c.key !== 'done').map((c) => ({
+        label: `移到「${c.label}」`,
+        icon: <ArrowRight size={12} />,
+        onClick: () => patch.mutate({ id: t.id, body: { status: c.key } }),
+      })),
+      { type: 'separator' as const },
+      {
+        label: '复制标题',
+        icon: <Copy size={12} />,
+        onClick: () => navigator.clipboard?.writeText(t.title),
+      },
+      {
+        label: '删除任务',
+        icon: <Trash2 size={12} />,
+        danger: true,
+        onClick: () => {
+          if (confirm(`删除任务「${t.title}」？`)) del.mutate(t.id)
+        },
+      },
+    ]
+  }, [ctxTask, openSteps, patch, del])
 
   const handleDragEnd = (e: DragEndEvent) => {
     setActiveId(null)
@@ -261,11 +336,14 @@ export default function TasksPage() {
                   <TaskCard
                     key={t.id}
                     task={t}
+                    stepsOpen={openSteps.has(t.id)}
+                    onToggleSteps={() => toggleSteps(t.id)}
                     onToggle={() =>
                       patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
                     }
                     onEdit={() => setEditing(t)}
                     onDelete={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
+                    onContextMenu={(e) => openCtx(e, t)}
                   />
                 ))}
               </BoardColumn>
@@ -298,59 +376,80 @@ export default function TasksPage() {
               {items.map((t) => {
                 const ts = dictOf(TASK_STATUS, t.status)
                 const ps = dictOf(TASK_PRIORITY, t.priority)
+                const open = openSteps.has(t.id)
                 return (
-                  <tr key={t.id} className="border-b border-[var(--border)] last:border-0 hover:bg-ink-50/60">
-                    <td className="px-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={t.status === 'done'}
-                          onChange={() =>
-                            patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
-                          }
-                          className="h-3.5 w-3.5 accent-emerald-500"
-                        />
-                        <span className={cn('truncate', t.status === 'done' && 'text-ink-400 line-through')}>
-                          {t.title}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="hidden px-2 py-2 text-ink-500 sm:table-cell">{t.projectName || '—'}</td>
-                    <td className="px-2 py-2">
-                      <Badge soft={ps.soft} dot={ps.color}>
-                        {ps.label}
-                      </Badge>
-                    </td>
-                    <td
-                      className={cn(
-                        'tabular px-2 py-2',
-                        t.dueState === 'overdue'
-                          ? 'font-semibold text-red-500'
-                          : t.dueState === 'soon'
-                            ? 'font-medium text-amber-600'
-                            : 'text-ink-500',
-                      )}
+                  <Fragment key={t.id}>
+                    <tr
+                      onContextMenu={(e) => openCtx(e, t)}
+                      onDoubleClick={() => setEditing(t)}
+                      className="border-b border-[var(--border)] hover:bg-ink-50/60"
                     >
-                      {fmtDateShort(t.dueDate)}
-                    </td>
-                    <td className="px-2 py-2">
-                      <Badge soft={ts.soft} dot={ts.color}>
-                        {ts.label}
-                      </Badge>
-                    </td>
-                    <td className="px-2 py-2 text-right">
-                      <Button variant="ghost" size="icon" onClick={() => setEditing(t)}>
-                        <Pencil size={12} />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={t.status === 'done'}
+                            onChange={() =>
+                              patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
+                            }
+                            className="h-3.5 w-3.5 accent-emerald-500"
+                          />
+                          <span
+                            className={cn(
+                              'truncate',
+                              t.status === 'done' && 'text-ink-400 line-through',
+                            )}
+                          >
+                            {t.title}
+                          </span>
+                          <StepsToggle task={t} open={open} onToggle={() => toggleSteps(t.id)} />
+                        </div>
+                      </td>
+                      <td className="hidden px-2 py-2 text-ink-500 sm:table-cell">{t.projectName || '—'}</td>
+                      <td className="px-2 py-2">
+                        <Badge soft={ps.soft} dot={ps.color}>
+                          {ps.label}
+                        </Badge>
+                      </td>
+                      <td
+                        className={cn(
+                          'tabular px-2 py-2',
+                          t.dueState === 'overdue'
+                            ? 'font-semibold text-red-500'
+                            : t.dueState === 'soon'
+                              ? 'font-medium text-amber-600'
+                              : 'text-ink-500',
+                        )}
                       >
-                        <Trash2 size={12} className="text-red-400" />
-                      </Button>
-                    </td>
-                  </tr>
+                        {fmtDateShort(t.dueDate)}
+                      </td>
+                      <td className="px-2 py-2">
+                        <Badge soft={ts.soft} dot={ts.color}>
+                          {ts.label}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <Button variant="ghost" size="icon" onClick={() => setEditing(t)}>
+                          <Pencil size={12} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
+                        >
+                          <Trash2 size={12} className="text-red-400" />
+                        </Button>
+                      </td>
+                    </tr>
+                    {/* 展开的步骤单独占一行，不挤在任务标题那一格里 */}
+                    {open && (
+                      <tr className="border-b border-[var(--border)] bg-ink-50/30">
+                        <td colSpan={6} className="px-3 pb-2 pt-0">
+                          <TaskSteps task={t} dense />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 )
               })}
             </tbody>
@@ -366,6 +465,11 @@ export default function TasksPage() {
             setEditing(null)
           }}
         />
+      )}
+
+      {/* 右键菜单 */}
+      {ctx.state && (
+        <ContextMenu x={ctx.state.x} y={ctx.state.y} items={ctxItems} onClose={ctx.close} />
       )}
 
       {/* 拖动残影交给 dnd-kit 的 DragOverlay，这里不再手写 */}
@@ -416,16 +520,22 @@ function BoardColumn({
 function TaskCard({
   task,
   overlay,
+  stepsOpen,
+  onToggleSteps,
   onToggle,
   onEdit,
   onDelete,
+  onContextMenu,
 }: {
   task: Task
   /** 拖动时的那份副本：不参与拖拽逻辑，按钮也不可点 */
   overlay?: boolean
+  stepsOpen?: boolean
+  onToggleSteps?: () => void
   onToggle: () => void
   onEdit: () => void
   onDelete: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
 }) {
   const ps = dictOf(TASK_PRIORITY, task.priority)
   const overdue = task.dueState === 'overdue'
@@ -451,6 +561,9 @@ function TaskCard({
         if (overlay) return
         if (!(e.target as HTMLElement).closest('[data-drag-handle]')) e.stopPropagation()
       }}
+      onContextMenu={overlay ? undefined : onContextMenu}
+      // 双击卡片打开编辑。mouse 拖拽有 5px 阈值，所以双击不会误触拖拽。
+      onDoubleClick={overlay ? undefined : onEdit}
       className={cn(
         'group rounded-lg border bg-white p-2.5 shadow-sm transition-all',
         isDragging
@@ -499,16 +612,9 @@ function TaskCard({
         <Badge soft={ps.soft} dot={ps.color}>
           {ps.label}
         </Badge>
-        {/* 步骤进度：2/4 这种，让「这条任务推进到哪」在卡片上就能看出来 */}
-        {(task.subtaskTotal ?? 0) > 0 && (
-          <Badge
-            className={cn(
-              'border-ink-200 bg-white',
-              (task.subtaskDone ?? 0) === task.subtaskTotal ? 'text-emerald-600' : 'text-ink-500',
-            )}
-          >
-            <ListChecks size={9} /> {task.subtaskDone}/{task.subtaskTotal}
-          </Badge>
+        {/* 步骤进度徽标点一下就在卡片内展开，不用进编辑弹窗 */}
+        {!overlay && onToggleSteps && (
+          <StepsToggle task={task} open={!!stepsOpen} onToggle={onToggleSteps} />
         )}
         {task.projectName && (
           <Badge className="border-ink-200 bg-white text-ink-500">
@@ -521,6 +627,8 @@ function TaskCard({
           </Badge>
         )}
       </div>
+
+      {!overlay && stepsOpen && <TaskSteps task={task} />}
 
       <div className="mt-1.5 flex items-center gap-2.5 text-[10px]">
         {task.dueDate && (

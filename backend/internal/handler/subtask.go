@@ -18,9 +18,13 @@ import (
 
 const subtaskTitleMax = 255
 
-// 回填一批任务的子任务进度。列表页只需要 done/total 两个数字，
-// 不把整个清单塞进列表响应里（一个任务十几条步骤会明显变重）。
-func (h *Handler) fillSubtaskProgress(tasks []model.Task) {
+// 回填一批任务的子任务进度。
+//
+// withItems=false 时只算 done/total 两个数字：看板默认只要徽标，
+// 没必要把每张卡的完整清单都传一遍。
+// withItems=true 时连清单一起回填：卡片上要能直接展开勾选，
+// 一张卡一个请求的话十几张卡就是十几个并发，不如一次带回来。
+func (h *Handler) fillSubtaskProgress(tasks []model.Task, withItems bool) {
 	if len(tasks) == 0 {
 		return
 	}
@@ -28,6 +32,28 @@ func (h *Handler) fillSubtaskProgress(tasks []model.Task) {
 	for _, t := range tasks {
 		ids = append(ids, t.ID)
 	}
+
+	if withItems {
+		var all []model.Subtask
+		h.DB.Where("task_id IN ?", ids).Order("sort ASC, id ASC").Find(&all)
+		byTask := make(map[uint][]model.Subtask, len(ids))
+		for _, s := range all {
+			byTask[s.TaskID] = append(byTask[s.TaskID], s)
+		}
+		for i := range tasks {
+			list := byTask[tasks[i].ID]
+			tasks[i].Subtasks = list
+			tasks[i].SubtaskTotal = len(list)
+			tasks[i].SubtaskDone = 0
+			for _, s := range list {
+				if s.Done {
+					tasks[i].SubtaskDone++
+				}
+			}
+		}
+		return
+	}
+
 	var rows []struct {
 		TaskID uint
 		Total  int
