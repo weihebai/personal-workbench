@@ -15,3 +15,6 @@ bin/
 shots*/
 _*.mjs
 PixPin_*.png
+
+# logo / 品牌设计的探索稿与渲染图，只在本地保留，不进仓库
+brand/
