@@ -93,11 +93,15 @@ export function TaskSteps({ task, dense }: { task: Task; dense?: boolean }) {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
+              // Enter / 空格必须拦在输入框这一层：
+              // 卡片的键盘拖拽激活键正好是这两个，放上去整列会亮成「松手放到这里」
+              e.stopPropagation()
               if (e.key === 'Escape') {
                 setAdding(false)
                 setDraft('')
               }
             }}
+            onKeyUp={(e) => e.stopPropagation()}
             placeholder="加一步…"
             className="h-5 min-w-0 flex-1 rounded border border-ink-200 bg-white px-1.5 text-[11px] outline-none focus:border-brand-400"
           />

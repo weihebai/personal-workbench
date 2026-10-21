@@ -549,11 +549,28 @@ function TaskCard({
     disabled: overlay,
   })
 
+  // dnd-kit 的键盘拖拽默认激活键是 Space 和 Enter，
+  // 而监听挂在整个卡片上——于是卡片里的「加一步」输入框一敲回车，
+  // 事件冒泡上来就被当成「拿起卡片」，整列亮起「松手放到这里」。
+  // 这里把来自可编辑元素的按键挡掉，让 Enter 老老实实提交表单。
+  const safeListeners = useMemo<typeof listeners>(() => {
+    if (!listeners) return undefined
+    const original = listeners.onKeyDown
+    return {
+      ...listeners,
+      onKeyDown: (e: React.KeyboardEvent) => {
+        const t = e.target as HTMLElement | null
+        if (t?.closest('input, textarea, select, [contenteditable="true"]')) return
+        original?.(e as never)
+      },
+    }
+  }, [listeners])
+
   return (
     <div
       ref={overlay ? undefined : setNodeRef}
       {...(overlay ? {} : attributes)}
-      {...(overlay ? {} : listeners)}
+      {...(overlay ? {} : safeListeners)}
       // 手指的拖拽只允许从手柄发起：dnd-kit 的触摸拖拽要求元素 touch-action:none，
       // 但整张卡都设成 none 的话，手机上就没法上下滚动任务列表了。
       // 所以在捕获阶段拦掉「不是从手柄开始」的触摸，让浏览器照常滚动。
