@@ -40,11 +40,15 @@ func TestLoginLimiterPersistsAcrossRestart(t *testing.T) {
 	if ok, _ := l.Allow(key); !ok {
 		t.Fatal("首次尝试应允许")
 	}
-	l.Fail(key)
+	if remaining, locked := l.Fail(key); remaining != 1 || locked != 0 {
+		t.Fatalf("失败一次应剩 1 次且未锁定，得到 remaining=%d locked=%v", remaining, locked)
+	}
 	if ok, _ := l.Allow(key); !ok {
 		t.Fatal("失败一次还不该锁定")
 	}
-	l.Fail(key)
+	if remaining, locked := l.Fail(key); remaining != 0 || locked != time.Minute {
+		t.Fatalf("达到阈值应返回锁定，得到 remaining=%d locked=%v", remaining, locked)
+	}
 	if ok, wait := l.Allow(key); ok || wait <= 0 {
 		t.Fatalf("连续失败 2 次应锁定，ok=%v wait=%v", ok, wait)
 	}
@@ -64,7 +68,9 @@ func TestLoginLimiterUnlocksAfterExpiry(t *testing.T) {
 	db := newLimiterTestDB(t)
 	key := "203.0.113.2"
 	l := newLoginLimiter(db, 1, time.Minute)
-	l.Fail(key)
+	if remaining, locked := l.Fail(key); remaining != 0 || locked != time.Minute {
+		t.Fatalf("唯一一次失败应触发锁定，得到 remaining=%d locked=%v", remaining, locked)
+	}
 
 	if ok, _ := l.Allow(key); ok {
 		t.Fatal("达到阈值后应锁定")

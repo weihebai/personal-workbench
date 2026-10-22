@@ -27,7 +27,9 @@ api.interceptors.response.use(
   (err) => {
     const status = err?.response?.status
     const url: string = err?.config?.url ?? ''
-    if (status === 401 && !url.includes('/auth/login')) {
+    // 改密码接口对「原密码错误」也返回 401，不能当成登录过期把用户踢出去
+    const credentialCheck = url.includes('/auth/login') || url.includes('/auth/password')
+    if (status === 401 && !credentialCheck) {
       setToken(null)
       if (!location.pathname.startsWith('/login')) location.href = '/login'
     }

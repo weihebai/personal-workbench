@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -56,13 +57,11 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var u model.User
 	err := h.DB.Where("username = ?", strings.TrimSpace(req.Username)).First(&u).Error
 	if err != nil {
-		h.limiter.Fail(ip)
-		fail(c, http.StatusUnauthorized, "用户名或密码错误")
+		h.loginFailed(c, ip)
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
-		h.limiter.Fail(ip)
-		fail(c, http.StatusUnauthorized, "用户名或密码错误")
+		h.loginFailed(c, ip)
 		return
 	}
 
@@ -78,6 +77,20 @@ func (h *AuthHandler) Login(c *gin.Context) {
 			"id": u.ID, "username": u.Username, "nickname": u.Nickname,
 		},
 	})
+}
+
+// loginFailed 计一次失败并告知剩余次数；达到阈值当次就进入锁定。
+func (h *AuthHandler) loginFailed(c *gin.Context, ip string) {
+	remaining, lockedFor := h.limiter.Fail(ip)
+	if lockedFor > 0 {
+		fail(c, http.StatusTooManyRequests, "尝试次数过多，请 "+lockedFor.Round(time.Second).String()+" 后再试")
+		return
+	}
+	if remaining > 0 {
+		fail(c, http.StatusUnauthorized, fmt.Sprintf("用户名或密码错误，还可尝试 %d 次", remaining))
+		return
+	}
+	fail(c, http.StatusUnauthorized, "用户名或密码错误")
 }
 
 // Logout 自增 token 版本，使该账号已签发的所有 token 立即失效。

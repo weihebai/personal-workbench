@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -92,6 +93,54 @@ func TestLogoutRevokesOldToken(t *testing.T) {
 	}
 	if w := do(http.MethodGet, "/me", newToken); w.Code != http.StatusOK {
 		t.Fatalf("重新登录后的 token 应可用，得到 %d %s", w.Code, w.Body.String())
+	}
+}
+
+// 失败提示要给出剩余次数，并在第 5 次失败时当场锁定，而不是等下一次请求。
+func TestLoginFailureShowsRemainingAttempts(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, _ := newTestHandler(t)
+	if err := h.DB.AutoMigrate(&model.User{}, &model.LoginAttempt{}); err != nil {
+		t.Fatalf("迁移失败: %v", err)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte("pass123"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("生成密码哈希失败: %v", err)
+	}
+	if err := h.DB.Create(&model.User{Username: "admin", PasswordHash: string(hash)}).Error; err != nil {
+		t.Fatalf("建用户失败: %v", err)
+	}
+
+	ah := NewAuthHandler(h, auth.New("test-secret", time.Hour))
+	r := gin.New()
+	r.POST("/login", ah.Login)
+
+	login := func(password string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/login",
+			bytes.NewBufferString(`{"username":"admin","password":"`+password+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		return w
+	}
+
+	for i, want := range []string{"还可尝试 4 次", "还可尝试 3 次", "还可尝试 2 次", "还可尝试 1 次"} {
+		w := login("wrong")
+		if w.Code != http.StatusUnauthorized {
+			t.Fatalf("第 %d 次失败应 401，得到 %d %s", i+1, w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), want) {
+			t.Fatalf("第 %d 次失败应提示 %q，得到 %s", i+1, want, w.Body.String())
+		}
+	}
+
+	w := login("wrong")
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), "尝试次数过多") {
+		t.Fatalf("第 5 次失败应当场锁定，得到 %d %s", w.Code, w.Body.String())
+	}
+	if w := login("pass123"); w.Code != http.StatusTooManyRequests {
+		t.Fatalf("锁定期内正确密码也应被拒，得到 %d %s", w.Code, w.Body.String())
 	}
 }
 

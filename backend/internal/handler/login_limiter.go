@@ -39,28 +39,31 @@ func (l *loginLimiter) Allow(key string) (bool, time.Duration) {
 	return true, 0
 }
 
-func (l *loginLimiter) Fail(key string) {
+// Fail 记录一次失败，返回剩余可尝试次数；本次触发锁定时 lockedFor > 0。
+func (l *loginLimiter) Fail(key string) (remaining int, lockedFor time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	now := time.Now()
 	// 先确保行存在，再用数据库自增，避免并发时读改写丢计数。
-	l.db.Clauses(clause.OnConflict{DoNothing: true}).
-		Create(&model.LoginAttempt{Key: key, UpdatedAt: now})
+	if err := l.db.Clauses(clause.OnConflict{DoNothing: true}).
+		Create(&model.LoginAttempt{Key: key, UpdatedAt: now}).Error; err != nil {
+		return 0, 0
+	}
 	if err := l.db.Model(&model.LoginAttempt{}).
 		Where(`"key" = ?`, key).
 		UpdateColumns(map[string]any{
 			"failures":   gorm.Expr("failures + 1"),
 			"updated_at": now,
 		}).Error; err != nil {
-		return
+		return 0, 0
 	}
 
 	var failures int
 	if err := l.db.Model(&model.LoginAttempt{}).
 		Where(`"key" = ?`, key).
 		Pluck("failures", &failures).Error; err != nil {
-		return
+		return 0, 0
 	}
 	if failures >= l.maxFails {
 		l.db.Model(&model.LoginAttempt{}).
@@ -70,7 +73,9 @@ func (l *loginLimiter) Fail(key string) {
 				"locked_until": now.Add(l.lockFor),
 				"updated_at":   now,
 			})
+		return 0, l.lockFor
 	}
+	return l.maxFails - failures, 0
 }
 
 func (l *loginLimiter) Reset(key string) {
