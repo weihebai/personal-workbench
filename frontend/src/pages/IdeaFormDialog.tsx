@@ -128,7 +128,7 @@ export function IdeaFormDialog({ idea, onClose }: { idea: Idea | null; onClose: 
           </div>
         </Field>
 
-        <Field label="标题" hint={!form.title.trim() && form.url.trim() ? '留空自动从链接生成' : undefined}>
+        <Field label="标题" hint={!form.title.trim() && form.url.trim() ? '留空自动抓取网页标题' : undefined}>
           <Input value={form.title} onChange={set('title')} placeholder="给它起个名，方便以后找" />
         </Field>
 

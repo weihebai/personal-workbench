@@ -209,7 +209,7 @@ func (h *Handler) CreateIdea(c *gin.Context) {
 		return
 	}
 	if in.Title == "" {
-		in.Title = deriveTitle(in)
+		in.Title = resolveIdeaTitle(c.Request.Context(), in)
 	}
 	it := model.Idea{
 		Title: in.Title, URL: in.URL, Source: in.Source,
@@ -242,7 +242,7 @@ func (h *Handler) UpdateIdea(c *gin.Context) {
 	}
 	normalizeIdea(&in)
 	if in.Title == "" {
-		in.Title = deriveTitle(in)
+		in.Title = resolveIdeaTitle(c.Request.Context(), in)
 	}
 	if in.Title == "" {
 		badRequest(c, "标题不能为空")
