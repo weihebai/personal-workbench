@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { LogIn, Sparkles } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { LogIn } from 'lucide-react'
 import { api, setToken, errMsg } from '@/lib/api'
+import { BrandMark } from '@/components/BrandMark'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Input'
 
@@ -11,6 +12,8 @@ export default function LoginPage() {
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const notice = params.get('reason') === 'password' ? '密码已更新，请重新登录' : ''
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -37,13 +40,18 @@ export default function LoginPage() {
       <div className="relative z-10 w-full max-w-sm">
         <div className="mb-6 text-center">
           <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-500 text-white shadow-lg shadow-brand-500/30">
-            <Sparkles size={22} />
+            <BrandMark className="h-8 w-8" />
           </div>
           <h1 className="text-xl font-bold tracking-tight text-ink-900">个人工作台</h1>
           <p className="mt-1 text-xs text-ink-400">项目 · 私活 · 收入，一个地方管清</p>
         </div>
 
         <form onSubmit={submit} className="card space-y-3.5 p-5 shadow-xl shadow-ink-900/5">
+          {notice && (
+            <div className="rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700">
+              {notice}
+            </div>
+          )}
           <Field label="用户名">
             <Input
               value={username}

@@ -16,6 +16,7 @@ import {
   CornerDownLeft,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { BrandMark } from '@/components/BrandMark'
 import { useEscClose } from '@/lib/useEscClose'
 import { api, getToken, setToken, type DashboardData } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
@@ -52,7 +53,12 @@ export default function AppShell() {
     '/reminders': (data?.counts.remindersSoon ?? 0) + (data?.counts.remindersExpired ?? 0),
   }
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await api.post('/auth/logout')
+    } catch {
+      // 服务端不可达时仍然退出本地登录态
+    }
     setToken(null)
     navigate('/login', { replace: true })
   }
@@ -63,9 +69,7 @@ export default function AppShell() {
       <aside className="sticky top-0 hidden h-screen w-56 shrink-0 flex-col border-r border-[var(--border)] bg-white lg:flex">
         <div className="flex h-14 items-center gap-2 px-4">
           <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500 text-white shadow-sm shadow-brand-500/30">
-            <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M3 7h18M3 12h12M3 17h8" strokeLinecap="round" />
-            </svg>
+            <BrandMark className="h-5 w-5" />
           </div>
           <span className="text-sm font-bold tracking-tight text-ink-900">工作台</span>
         </div>
@@ -202,7 +206,12 @@ export default function AppShell() {
           <div className="absolute inset-0 bg-ink-950/40" onClick={() => setMobileOpen(false)} />
           <div className="relative h-full w-64 bg-white p-3 shadow-xl">
             <div className="mb-3 flex items-center justify-between">
-              <span className="text-sm font-bold">工作台</span>
+              <div className="flex items-center gap-2">
+                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500 text-white">
+                  <BrandMark className="h-5 w-5" />
+                </div>
+                <span className="text-sm font-bold">工作台</span>
+              </div>
               <button onClick={() => setMobileOpen(false)} className="text-ink-400">
                 <X size={18} />
               </button>

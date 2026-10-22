@@ -20,6 +20,18 @@ type User struct {
 	PasswordHash string `gorm:"size:255;not null" json:"-"`
 	Nickname     string `gorm:"size:64" json:"nickname"`
 	Avatar       string `gorm:"size:255" json:"avatar"`
+	// TokenVersion 写入 JWT；登出时自增，让已签发的 token 立即失效。
+	// 老 token 没有 ver 字段时按 0 处理，与初始版本一致，升级不会踢人。
+	TokenVersion int `gorm:"not null;default:0" json:"-"`
+}
+
+// LoginAttempt 登录失败限流记录。落库而不是放内存：
+// 重启后锁定仍然有效，多个进程也共享同一份计数。
+type LoginAttempt struct {
+	Key         string     `gorm:"primarykey;size:128" json:"-"`
+	Failures    int        `gorm:"not null;default:0" json:"-"`
+	LockedUntil *time.Time `json:"-"`
+	UpdatedAt   time.Time  `json:"-"`
 }
 
 // 客户（外包甲方 / 渠道方）
@@ -261,7 +273,7 @@ type Attachment struct {
 
 func AllModels() []any {
 	return []any{
-		&User{}, &Client{}, &Project{}, &Payment{}, &Task{},
+		&User{}, &LoginAttempt{}, &Client{}, &Project{}, &Payment{}, &Task{},
 		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{}, &Idea{},
 		&Subtask{}, &Attachment{},
 	}

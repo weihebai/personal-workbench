@@ -144,6 +144,17 @@ func commissionOf(p *model.Project) float64 {
 	return c
 }
 
+// sumCommission 汇总抽成。必须逐项目套用 commissionOf 后再相加：
+// 若先把所有合同额汇总再统一封顶，固定抽成高于自身合同额的项目会算多，
+// 导致总览的抽成与项目页逐个相加的结果对不上。
+func sumCommission(items []model.Project) float64 {
+	var sum float64
+	for i := range items {
+		sum += commissionOf(&items[i])
+	}
+	return sum
+}
+
 // fillCommission 填充抽成与净收入（只读字段）
 func fillCommission(items []model.Project) {
 	for i := range items {

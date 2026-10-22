@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, Wand2 } from 'lucide-react'
 import { api, errMsg, type Milestone } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -8,7 +8,7 @@ import { Select, type Option } from '@/components/ui/Select'
 import { DatePicker } from '@/components/ui/DatePicker'
 import { Dialog } from '@/components/ui/Layout'
 import { cn, toDateInput, MILESTONE_STATUS } from '@/lib/utils'
-import { addWorkdays, addNaturalDays, fmtDateCn, toISO } from '@/lib/workday'
+import { fmtDateCn, parseDateOnly, toISO } from '@/lib/workday'
 
 const STATUS_OPTS: Option[] = Object.entries(MILESTONE_STATUS).map(([v, d]) => ({
   value: v,
@@ -53,15 +53,38 @@ export function MilestoneFormDialog({
   const [manualDue, setManualDue] = useState(!!milestone?.dueDate && !milestone?.days)
   const [err, setErr] = useState('')
 
-  // 实时推算目标日期
-  const preview = useMemo(() => {
-    if (manualDue) return form.dueDate ? new Date(form.dueDate) : null
+  // 到期日推算统一走后端，前端只做展示，避免两份算法慢慢分叉。
+  const [previewParams, setPreviewParams] = useState<{ start: string; days: number; dayType: string } | null>(null)
+
+  useEffect(() => {
+    if (manualDue) {
+      setPreviewParams(null)
+      return
+    }
     const days = Number(form.days)
-    if (!form.startDate || !days) return null
-    const start = new Date(form.startDate)
-    if (Number.isNaN(start.getTime())) return null
-    return form.dayType === 'natural' ? addNaturalDays(start, days) : addWorkdays(start, days)
-  }, [form.startDate, form.days, form.dayType, form.dueDate, manualDue])
+    if (!form.startDate || !Number.isInteger(days) || days <= 0) {
+      setPreviewParams(null)
+      return
+    }
+    const t = setTimeout(() => {
+      setPreviewParams({ start: form.startDate, days, dayType: form.dayType })
+    }, 200)
+    return () => clearTimeout(t)
+  }, [form.startDate, form.days, form.dayType, manualDue])
+
+  const { data: previewDue, isFetching: previewFetching } = useQuery({
+    queryKey: ['workday-preview', previewParams?.start, previewParams?.days, previewParams?.dayType],
+    queryFn: async () => {
+      if (!previewParams) throw new Error('缺少预览参数')
+      const { data } = await api.get<{ dueDate: string }>('/workdays/preview', { params: previewParams })
+      return data.dueDate
+    },
+    enabled: !!previewParams,
+    staleTime: Infinity,
+  })
+
+  const previewDate = !manualDue && previewParams && previewDue ? parseDateOnly(previewDue) : null
+  const previewPending = !manualDue && !!previewParams && previewFetching && !previewDue
 
   const save = useMutation({
     mutationFn: async () => {
@@ -73,8 +96,9 @@ export function MilestoneFormDialog({
         startDate: form.startDate,
         dayType: form.dayType,
         days: manualDue ? 0 : Number(form.days) || 0,
-        // 注意：必须用本地时区格式化，toISOString() 在东八区会偏移一天
-        dueDate: manualDue ? form.dueDate : preview ? toISO(preview) : '',
+        // 自动模式不传 dueDate，让后端按同一套工作日规则计算；
+        // 传前端预览值会有「改了工期但预览还没回来就保存」的竞态。
+        dueDate: manualDue ? form.dueDate : '',
         remindDays: Number(form.remindDays) || 3,
         note: form.note,
       }
@@ -191,17 +215,19 @@ export function MilestoneFormDialog({
           <div
             className={cn(
               'mt-2.5 flex items-center gap-2 rounded-lg border px-2.5 py-2',
-              preview ? 'border-brand-200 bg-brand-50' : 'border-ink-200 bg-ink-50',
+              previewDate ? 'border-brand-200 bg-brand-50' : 'border-ink-200 bg-ink-50',
             )}
           >
-            <span className={cn('dot', preview ? 'bg-brand-500' : 'bg-ink-300')} />
-            {preview ? (
+            <span className={cn('dot', previewDate ? 'bg-brand-500' : 'bg-ink-300')} />
+            {previewDate ? (
               <p className="text-[11px] text-ink-600">
-                预计 <span className="font-semibold text-brand-700">{fmtDateCn(preview)}</span> 到期
+                预计 <span className="font-semibold text-brand-700">{fmtDateCn(previewDate)}</span> 到期
                 <span className="ml-1 text-ink-400">
                   （{form.dayType === 'natural' ? '自然日' : '工作日'} {form.days} 天）
                 </span>
               </p>
+            ) : previewPending ? (
+              <p className="text-[11px] text-ink-400">计算中…</p>
             ) : (
               <p className="text-[11px] text-ink-400">填写起始日与工期后自动计算</p>
             )}

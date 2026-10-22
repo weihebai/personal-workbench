@@ -1,29 +1,16 @@
-/** 工作日推算（与后端 workday.go 保持一致的算法） */
+/**
+ * 日期展示工具。
+ * 工作日/自然日的到期推算统一走后端 /api/workdays/preview，
+ * 前端不再保留第二份算法，避免两边改一处漏一处。
+ */
 
 const pad = (n: number) => String(n).padStart(2, '0')
 
-function normalize(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate())
-}
-
-/** 顺延 n 个工作日，起始日不计入 */
-export function addWorkdays(start: Date, n: number): Date {
-  const d = normalize(start)
-  if (n <= 0) return d
-  let added = 0
-  while (added < n) {
-    d.setDate(d.getDate() + 1)
-    const wd = d.getDay()
-    if (wd !== 0 && wd !== 6) added++
-  }
-  return d
-}
-
-/** 顺延 n 个自然日 */
-export function addNaturalDays(start: Date, n: number): Date {
-  const d = normalize(start)
-  d.setDate(d.getDate() + n)
-  return d
+/** 解析 YYYY-MM-DD，按本地时区构造，避免 new Date(str) 在负时区偏一天 */
+export function parseDateOnly(s: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
 }
 
 /** 中文日期：2026年11月5日 周四 */

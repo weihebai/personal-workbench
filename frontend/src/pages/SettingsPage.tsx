@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { KeyRound, User, Server, ShieldCheck, Info } from 'lucide-react'
-import { api, errMsg } from '@/lib/api'
+import { api, errMsg, setToken } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Input'
 import { Card, PageHeader } from '@/components/ui/Layout'
@@ -10,6 +11,7 @@ export default function SettingsPage() {
   const [oldPassword, setOld] = useState('')
   const [newPassword, setNew] = useState('')
   const [msg, setMsg] = useState<{ type: 'ok' | 'err'; text: string } | null>(null)
+  const navigate = useNavigate()
 
   const { data: me } = useQuery({
     queryKey: ['me'],
@@ -19,9 +21,9 @@ export default function SettingsPage() {
   const change = useMutation({
     mutationFn: async () => (await api.post('/auth/password', { oldPassword, newPassword })).data,
     onSuccess: () => {
-      setMsg({ type: 'ok', text: '密码已更新' })
-      setOld('')
-      setNew('')
+      // 后端已吊销当前 token，本地登录态同步清掉，回登录页重新登录。
+      setToken(null)
+      navigate('/login?reason=password', { replace: true })
     },
     onError: (e) => setMsg({ type: 'err', text: errMsg(e) }),
   })
@@ -92,7 +94,7 @@ export default function SettingsPage() {
               <Row k="访问方式" v="Cloudflare Tunnel（源站不开放端口）" />
               <Row k="数据存储" v="SQLite，单文件，容器内 /app/data" />
               <Row k="备份建议" v="定期复制 workbench.db 到宿主机" />
-              <Row k="登录保护" v="JWT + 密码哈希 + 失败限流（5 次锁 10 分钟）" />
+              <Row k="登录保护" v="JWT + 密码哈希 + 失败限流；登出/改密即吊销旧 token" />
             </dl>
           </Card>
 

@@ -16,15 +16,30 @@ import (
 type AuthHandler struct {
 	*Handler
 	Mgr     *auth.Manager
-	Limiter *auth.Limiter
-	// 从配置派生的管理员账号，仅在库中无用户时用于初始化
-	AdminUser string
-	AdminPass string
+	limiter *loginLimiter
+}
+
+func NewAuthHandler(h *Handler, mgr *auth.Manager) *AuthHandler {
+	return &AuthHandler{
+		Handler: h,
+		Mgr:     mgr,
+		limiter: newLoginLimiter(h.DB, 5, 10*time.Minute),
+	}
+}
+
+// TokenValid 鉴权时的附加校验：登出会自增 token_version，
+// 旧 token 即使没过期也会在这里被拒绝。
+func (h *AuthHandler) TokenValid(uid uint, version int) bool {
+	var u model.User
+	if err := h.DB.Select("id", "token_version").First(&u, uid).Error; err != nil {
+		return false
+	}
+	return u.TokenVersion == version
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
 	ip := c.ClientIP()
-	if ok, wait := h.Limiter.Allow(ip); !ok {
+	if ok, wait := h.limiter.Allow(ip); !ok {
 		fail(c, http.StatusTooManyRequests, "尝试次数过多，请 "+wait.Round(time.Second).String()+" 后再试")
 		return
 	}
@@ -41,28 +56,40 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var u model.User
 	err := h.DB.Where("username = ?", strings.TrimSpace(req.Username)).First(&u).Error
 	if err != nil {
-		h.Limiter.Fail(ip)
+		h.limiter.Fail(ip)
 		fail(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(req.Password)) != nil {
-		h.Limiter.Fail(ip)
+		h.limiter.Fail(ip)
 		fail(c, http.StatusUnauthorized, "用户名或密码错误")
 		return
 	}
 
-	token, err := h.Mgr.Sign(u.ID, u.Username)
+	token, err := h.Mgr.Sign(u.ID, u.Username, u.TokenVersion)
 	if err != nil {
 		serverErr(c, err)
 		return
 	}
-	h.Limiter.Reset(ip)
+	h.limiter.Reset(ip)
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
 		"user": gin.H{
 			"id": u.ID, "username": u.Username, "nickname": u.Nickname,
 		},
 	})
+}
+
+// Logout 自增 token 版本，使该账号已签发的所有 token 立即失效。
+func (h *AuthHandler) Logout(c *gin.Context) {
+	uid := c.GetUint("uid")
+	if err := h.DB.Model(&model.User{}).
+		Where("id = ?", uid).
+		UpdateColumn("token_version", gorm.Expr("token_version + 1")).Error; err != nil {
+		serverErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func (h *AuthHandler) Me(c *gin.Context) {
@@ -101,7 +128,12 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
-	if err := h.DB.Model(&u).Update("password_hash", string(hash)).Error; err != nil {
+	// 改密码同时提升 token 版本：怀疑泄露时改密码才有意义，
+	// 否则旧 token 还能一直用到自然过期。
+	if err := h.DB.Model(&u).Updates(map[string]any{
+		"password_hash": string(hash),
+		"token_version": gorm.Expr("token_version + 1"),
+	}).Error; err != nil {
 		serverErr(c, err)
 		return
 	}

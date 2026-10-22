@@ -67,6 +67,19 @@ func TestCommissionOf(t *testing.T) {
 	}
 }
 
+// 总览汇总必须与项目页逐项相加一致：固定抽成超过自身合同额时，
+// 先汇总再封顶会把别的项目的额度「借」给它，算出偏大的抽成。
+func TestSumCommissionUsesPerProjectCap(t *testing.T) {
+	items := []model.Project{
+		{Quote: 300, CommissionType: "fixed", CommissionRate: 500},
+		{Quote: 10000, CommissionType: "pct", CommissionRate: 20},
+		{Quote: 5000, CommissionType: "none"},
+	}
+	if got, want := sumCommission(items), 2300.0; got != want {
+		t.Fatalf("sumCommission() = %v, want %v", got, want)
+	}
+}
+
 func TestFillCommissionNetQuote(t *testing.T) {
 	items := []model.Project{
 		{Quote: 10000, CommissionType: "pct", CommissionRate: 20},

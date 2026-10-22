@@ -72,25 +72,12 @@ func (h *Handler) Dashboard(c *gin.Context) {
 		Scan(&projFin)
 	fin.Quote, fin.Cost = projFin.Quote, projFin.Cost
 
-	// 中介抽成总额：按比例的和按固定金额的分开算，
-	// 与 project.commissionOf 保持同一套规则（抽成不超过合同额）。
-	var commPct struct{ V float64 }
-	h.DB.Model(&model.Project{}).
-		Select("COALESCE(SUM(quote * commission_rate / 100.0),0) as v").
-		Where("commission_type = ? AND commission_rate > 0", "pct").
-		Scan(&commPct)
-	var commFixed struct{ V float64 }
-	h.DB.Model(&model.Project{}).
-		Select("COALESCE(SUM(commission_rate),0) as v").
-		Where("commission_type = ? AND commission_rate > 0", "fixed").
-		Scan(&commFixed)
-	commission := commPct.V + commFixed.V
-	if commission < 0 {
-		commission = 0
-	}
-	if commission > fin.Quote {
-		commission = fin.Quote
-	}
+	// 中介抽成总额：逐项目套用 commissionOf（含单项目封顶）后求和，
+	// 与项目页展示的抽成保持同一口径。
+	var commissionProjects []model.Project
+	h.DB.Select("id", "quote", "commission_type", "commission_rate").Find(&commissionProjects)
+	commission := sumCommission(commissionProjects)
+	netQuote := fin.Quote - commission
 
 	var payFin struct {
 		Received float64
@@ -202,15 +189,15 @@ func (h *Handler) Dashboard(c *gin.Context) {
 			// 预估利润 = 净合同额 - 成本：手上所有项目全做完能赚多少。
 			// 原来算的是「已收 - 成本」，那是已实现利润，跟「预估」名不符实，
 			// 而且成本按项目全量算、收入只算已到账，两头口径不一致。
-			"profit": fin.Quote - commission - fin.Cost,
+			"profit": netQuote - fin.Cost,
 			// 已实现利润 = 已收 - 成本：真正落袋的部分，给卡片做副标题用
 			"profitRealized": fin.Received - fin.Cost,
 			// 净合同额 = 合同额 - 抽成
 			"commission": commission,
-			"netQuote":   fin.Quote - commission,
+			"netQuote":   netQuote,
 			// 待收基于净合同额：收款项记录的都是实际到账（已扣抽成）的钱，
 			// 拿含抽成的合同额去减会算出一笔永远收不到的差额。
-			"unreceived": fin.Quote - commission - fin.Received,
+			"unreceived": netQuote - fin.Received,
 		},
 		"monthly":         months,
 		"byKind":          kindStats,

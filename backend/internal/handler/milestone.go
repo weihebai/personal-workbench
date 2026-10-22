@@ -3,6 +3,7 @@ package handler
 import (
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -89,6 +90,28 @@ func milestoneState(m model.Milestone) string {
 		return "soon"
 	}
 	return "normal"
+}
+
+// PreviewMilestoneDue 供前端实时预览。保存时仍由 resolveDue 计算，
+// 两边共用 computeDue，避免前端再维护一份工作日算法。
+func (h *Handler) PreviewMilestoneDue(c *gin.Context) {
+	start := mustParseDate(c.Query("start"))
+	if start == nil {
+		badRequest(c, "起始日格式应为 YYYY-MM-DD")
+		return
+	}
+	days, err := strconv.Atoi(c.Query("days"))
+	if err != nil || days <= 0 || days > 3650 {
+		badRequest(c, "工期需在 1-3650 天之间")
+		return
+	}
+	dayType := c.DefaultQuery("dayType", "workday")
+	if dayType != "workday" && dayType != "natural" {
+		badRequest(c, "计算方式只能是 workday 或 natural")
+		return
+	}
+	due := computeDue(start, days, dayType)
+	c.JSON(http.StatusOK, gin.H{"dueDate": due.Format("2006-01-02")})
 }
 
 type milestoneInput struct {

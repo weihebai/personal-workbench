@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -61,14 +63,13 @@ func main() {
 	}
 
 	mgr := auth.New(cfg.JWTSecret, cfg.TokenTTL)
-	limiter := auth.NewLimiter(5, 10*time.Minute)
 	h := handler.New(db, cfg)
 
 	// 上传目录提前建好，免得第一次传图才报错
 	if err := os.MkdirAll(cfg.UploadDir, 0o755); err != nil {
 		log.Fatalf("create upload dir %s: %v", cfg.UploadDir, err)
 	}
-	ah := &handler.AuthHandler{Handler: h, Mgr: mgr, Limiter: limiter, AdminUser: cfg.AdminUser, AdminPass: cfg.AdminPass}
+	ah := handler.NewAuthHandler(h, mgr)
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
@@ -101,10 +102,11 @@ func main() {
 		api.GET("/attachments/:hash/raw", h.ServeAttachment)
 
 		authed := api.Group("")
-		authed.Use(mgr.Middleware())
+		authed.Use(mgr.Middleware(ah.TokenValid))
 		{
 			authed.GET("/auth/me", ah.Me)
 			authed.POST("/auth/password", ah.ChangePassword)
+			authed.POST("/auth/logout", ah.Logout)
 
 			authed.GET("/dashboard", h.Dashboard)
 			authed.GET("/search", h.Search)
@@ -147,6 +149,8 @@ func main() {
 			authed.PUT("/reminders/:id", h.UpdateReminder)
 			authed.DELETE("/reminders/:id", h.DeleteReminder)
 
+			authed.GET("/workdays/preview", h.PreviewMilestoneDue)
+
 			authed.GET("/milestones", h.ListMilestones)
 			authed.POST("/milestones", h.CreateMilestone)
 			authed.PUT("/milestones/:id", h.UpdateMilestone)
@@ -169,9 +173,29 @@ func main() {
 
 	// 生产环境由后端托管前端静态资源（Docker 单容器部署）
 	if staticDir := os.Getenv("STATIC_DIR"); staticDir != "" {
-		r.Static("/assets", filepath.Join(staticDir, "assets"))
+		root, err := filepath.Abs(staticDir)
+		if err != nil {
+			log.Fatalf("STATIC_DIR 无效: %v", err)
+		}
+		r.Static("/assets", filepath.Join(root, "assets"))
 		r.NoRoute(func(c *gin.Context) {
-			c.File(filepath.Join(staticDir, "index.html"))
+			// 根目录下的静态文件（favicon.ico / favicon.svg / site.webmanifest /
+			// apple-touch-icon.png / icons/*）不属于 /assets，之前会被通配成
+			// index.html —— 浏览器拿到的是一段 HTML，图标就一直是默认的空白页。
+			// 这里先按真实文件命中，剩下的路径才交给 SPA 兜底。
+			if p := c.Request.URL.Path; p != "/" {
+				// path.Clean（斜杠语义，与平台无关）吃掉 ../ 和重复斜杠，
+				// 再剥掉前导分隔符得到相对路径。
+				rel := strings.TrimPrefix(path.Clean("/"+p), "/")
+				if rel != "" && rel != "." && !strings.HasPrefix(rel, "..") {
+					target := filepath.Join(root, filepath.FromSlash(rel))
+					if info, statErr := os.Stat(target); statErr == nil && !info.IsDir() {
+						c.File(target)
+						return
+					}
+				}
+			}
+			c.File(filepath.Join(root, "index.html"))
 		})
 	}
 
