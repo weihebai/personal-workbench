@@ -101,7 +101,7 @@ export default function PaymentsPage() {
           <EmptyState
             icon={<Wallet size={20} />}
             title="还没有收款记录"
-            desc="在项目详情页添加分期收款，或在这里直接登记"
+            desc="在项目里「确认收货 · 记应收」，或在这里直接登记"
             action={
               <Button size="sm" onClick={() => setEditing(null)}>
                 <Plus size={14} /> 登记第一笔
@@ -117,7 +117,7 @@ export default function PaymentsPage() {
                 <th className="px-3 py-2 font-medium">款项</th>
                 <th className="hidden px-2 py-2 font-medium sm:table-cell">项目</th>
                 <th className="px-2 py-2 text-right font-medium">金额</th>
-                <th className="hidden px-2 py-2 font-medium md:table-cell">约定日</th>
+                <th className="hidden px-2 py-2 font-medium md:table-cell">到期日</th>
                 <th className="hidden px-2 py-2 font-medium md:table-cell">到账日</th>
                 <th className="px-2 py-2 font-medium">状态</th>
                 <th className="px-2 py-2" />
@@ -134,7 +134,13 @@ export default function PaymentsPage() {
                     </td>
                     <td className="tabular px-2 py-2 text-right font-bold text-ink-900">{money(p.amount)}</td>
                     <td className="tabular hidden px-2 py-2 text-ink-500 md:table-cell">
-                      {fmtDate(p.planDate)}
+                      {p.planDate ? (
+                        fmtDate(p.planDate)
+                      ) : p.dueDate ? (
+                        <span className="text-ink-400">账期至 {fmtDate(p.dueDate)}</span>
+                      ) : (
+                        '—'
+                      )}
                       {p.overdue && (
                         <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
                           逾期 {p.daysLate} 天

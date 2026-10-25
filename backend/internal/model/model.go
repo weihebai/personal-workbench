@@ -83,21 +83,25 @@ type Project struct {
 	NextDueIn      *int   `gorm:"-" json:"nextDueIn"`
 }
 
-// 收款节点
+// 收款节点。
+// 流程是先干活、客户确认收货、之后才结款，所以确认收货日是一等字段：
+// 没约定具体日期的款，从确认收货那天起算账期，超了就算逾期。
 type Payment struct {
 	Base
-	ProjectID  uint       `gorm:"index;not null" json:"projectId"`
-	Title      string     `gorm:"size:128" json:"title"` // 首款/中期款/尾款/中介结款
-	Amount     float64    `json:"amount"`
-	Status     string     `gorm:"size:16;index" json:"status"` // pending 待收 / received 已收 / overdue 已逾期
-	PlanDate   *time.Time `json:"planDate"`   // 约定收款日
-	PaidDate   *time.Time `json:"paidDate"`   // 实际到账日
-	Note       string     `gorm:"size:512" json:"note"`
+	ProjectID   uint       `gorm:"index;not null" json:"projectId"`
+	Title       string     `gorm:"size:128" json:"title"` // 验收结款/首款/中介结款…
+	Amount      float64    `json:"amount"`
+	Status      string     `gorm:"size:16;index" json:"status"` // pending 待收 / received 已收 / overdue 已逾期
+	ConfirmDate *time.Time `json:"confirmDate"`                 // 确认收货日
+	PlanDate    *time.Time `json:"planDate"`                    // 约定收款日
+	PaidDate    *time.Time `json:"paidDate"`                    // 实际到账日
+	Note        string     `gorm:"size:512" json:"note"`
 
-	// 只读派生字段：约定日已过但还没到账时由后端算出来，前端不用自己判断
-	Overdue    bool   `gorm:"-" json:"overdue"`
-	DaysLate   int    `gorm:"-" json:"daysLate"`
-	ProjectName string `gorm:"-" json:"projectName"`
+	// 只读派生字段：由后端算出来，前端不用自己判断
+	Overdue  bool       `gorm:"-" json:"overdue"`
+	DaysLate int        `gorm:"-" json:"daysLate"`
+	DueDate  *time.Time `gorm:"-" json:"dueDate"` // 生效到期日：约定日，没填则按确认收货+账期推
+	ProjectName string  `gorm:"-" json:"projectName"`
 }
 
 // 任务
@@ -105,10 +109,13 @@ type Task struct {
 	Base
 	Title    string `gorm:"size:255;not null;index" json:"title"`
 	Desc     string `gorm:"type:text" json:"desc"`
+	// 验收标准：任务完成的判定依据，一行一条。AI 完成后只流转到 review，
+	// 人工对着这里逐条实测通过才算 done。
+	AcceptCriteria string `gorm:"type:text" json:"acceptCriteria"`
 	ProjectID *uint `gorm:"index" json:"projectId"`
 	ClientID  *uint `gorm:"index" json:"clientId"`
 
-	Status   string `gorm:"size:16;index" json:"status"`   // todo 待办 / doing 进行中 / done 已完成 / canceled 已取消
+	Status   string `gorm:"size:16;index" json:"status"`   // todo 待办 / doing 进行中 / review 待验收 / done 已完成 / canceled 已取消
 	Priority string `gorm:"size:16;index" json:"priority"` // low 低 / normal 普通 / high 高 / urgent 紧急
 	Kind     string `gorm:"size:16;index" json:"kind"`     // personal 个人 / freelance 私活
 

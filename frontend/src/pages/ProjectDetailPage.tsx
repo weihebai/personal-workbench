@@ -27,7 +27,7 @@ import {
   type Task,
 } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
-import { Badge, Card, EmptyState, Skeleton, Dialog } from '@/components/ui/Layout'
+import { Badge, Card, Skeleton, Dialog } from '@/components/ui/Layout'
 import {
   cn,
   money,
@@ -64,6 +64,10 @@ export default function ProjectDetailPage() {
   const [payDialog, setPayDialog] = useState<Payment | null | undefined>(undefined)
   // 中介结款的快捷录入（预填标题和净额，只需选日期）
   const [payQuick, setPayQuick] = useState(false)
+  // 中介「钱已到账」的快捷录入：平台自动确认、次月必结的款不用提前盯，到账当天直接记已收
+  const [payInstant, setPayInstant] = useState(false)
+  // 「客户确认收货了」的快捷录入：预填确认收货日=今天、金额=剩余待收
+  const [payConfirm, setPayConfirm] = useState(false)
   // undefined=关闭, null=新建, 对象=编辑
   const [msDialog, setMsDialog] = useState<Milestone | null | undefined>(undefined)
 
@@ -87,6 +91,17 @@ export default function ProjectDetailPage() {
       qc.invalidateQueries({ queryKey: ['project', id] })
       qc.invalidateQueries({ queryKey: ['projects'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+
+  // 一键到账：paidDate 不传，后端会自动填今天
+  const markReceived = useMutation({
+    mutationFn: async (pay: Payment) => api.put(`/payments/${pay.id}`, { ...pay, status: 'received' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] })
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
     },
   })
 
@@ -210,7 +225,7 @@ export default function ProjectDetailPage() {
       <Card padding={false}>
         <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
           <h3 className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
-            <Wallet size={13} className="text-emerald-600" /> 收款安排
+            <Wallet size={13} className="text-emerald-600" /> 收款记录
             <span className="text-[10px] font-normal text-ink-400">({data.payments.length})</span>
           </h3>
           {isBroker && data.payments.length === 0 ? (
@@ -229,10 +244,15 @@ export default function ProjectDetailPage() {
               net={remain}
               broker={p.broker}
               onAdd={() => setPayQuick(true)}
+              onInstant={() => setPayInstant(true)}
               onDivide={() => setPayDialog(null)}
             />
           ) : (
-            <EmptyState title="还没有收款记录" desc="按分期添加，追踪每笔到账" />
+            <ConfirmPayEmptyState
+              net={remain}
+              onConfirm={() => setPayConfirm(true)}
+              onManual={() => setPayDialog(null)}
+            />
           )
         ) : (
           <table className="w-full text-xs">
@@ -240,7 +260,7 @@ export default function ProjectDetailPage() {
               <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-ink-400">
                 <th className="px-3 py-1.5 font-medium">款项</th>
                 <th className="px-2 py-1.5 font-medium">金额</th>
-                <th className="px-2 py-1.5 font-medium">约定日</th>
+                <th className="px-2 py-1.5 font-medium">到期日</th>
                 <th className="px-2 py-1.5 font-medium">到账日</th>
                 <th className="px-2 py-1.5 font-medium">状态</th>
                 <th className="px-2 py-1.5" />
@@ -254,7 +274,13 @@ export default function ProjectDetailPage() {
                     <td className="px-3 py-1.5 font-medium text-ink-900">{pay.title || '—'}</td>
                     <td className="tabular px-2 py-1.5 font-semibold text-ink-900">{money(pay.amount)}</td>
                     <td className="tabular px-2 py-1.5 text-ink-500">
-                      {fmtDate(pay.planDate)}
+                      {pay.planDate ? (
+                        fmtDate(pay.planDate)
+                      ) : pay.dueDate ? (
+                        <span className="text-ink-400">账期至 {fmtDate(pay.dueDate)}</span>
+                      ) : (
+                        '—'
+                      )}
                       {pay.overdue && (
                         <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
                           逾期 {pay.daysLate} 天
@@ -268,6 +294,16 @@ export default function ProjectDetailPage() {
                       </Badge>
                     </td>
                     <td className="px-2 py-1.5 text-right">
+                      {pay.status !== 'received' && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="标记到账"
+                          onClick={() => markReceived.mutate(pay)}
+                        >
+                          <CheckCircle2 size={13} className="text-emerald-500" />
+                        </Button>
+                      )}
                       <Button variant="ghost" size="icon" onClick={() => setPayDialog(pay)}>
                         <Pencil size={12} />
                       </Button>
@@ -390,6 +426,30 @@ export default function ProjectDetailPage() {
           onClose={() => setPayQuick(false)}
         />
       )}
+      {payInstant && (
+        <PaymentFormDialog
+          payment={null}
+          defaultProjectId={p.id}
+          defaultTitle="中介结款"
+          defaultAmount={remain > 0 ? remain : undefined}
+          defaultStatus="received"
+          defaultPaidDate={todayInput()}
+          hintText="适合平台自动确认收货、次月必结的款：不用提前盯着，钱到账当天记一笔就行。"
+          onClose={() => setPayInstant(false)}
+        />
+      )}
+      {payConfirm && (
+        <PaymentFormDialog
+          payment={null}
+          defaultProjectId={p.id}
+          defaultTitle="验收结款"
+          defaultAmount={remain > 0 ? remain : undefined}
+          defaultConfirmDate={todayInput()}
+          confirmDelivery
+          hintText="已按今天记下「客户确认收货」。约定日留空的话，拖过账期还没到账会自动标逾期；项目状态也会一起切成「已交付」。"
+          onClose={() => setPayConfirm(false)}
+        />
+      )}
       {msDialog !== undefined && (
         <MilestoneFormDialog
           milestone={msDialog}
@@ -401,16 +461,65 @@ export default function ProjectDetailPage() {
   )
 }
 
-// 中介项目的收款空态：强调「就一笔」，而不是引导用户去拆分期
+// 本地时区的今天，YYYY-MM-DD，用作确认收货日的默认值
+function todayInput() {
+  const d = new Date()
+  const p = (x: number) => String(x).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+// 直客项目的收款空态：先干活后收钱，这里空着才正常。
+// 主推「确认收货」这一步——把验收时点记下来，账期从这天起算，拖着不结会自己变逾期。
+function ConfirmPayEmptyState({
+  net,
+  onConfirm,
+  onManual,
+}: {
+  net: number
+  onConfirm: () => void
+  onManual: () => void
+}) {
+  return (
+    <div className="px-3 py-4">
+      <div className="rounded-lg border border-brand-200 bg-brand-50/50 px-3 py-2.5">
+        <p className="text-[11px] font-semibold text-brand-700">
+          先干活，客户确认收货后再来记收款，完全来得及
+        </p>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-500">
+          客户（或中介）点头的那一刻点下面的按钮：记一笔应收、把今天存成确认收货日，
+          之后超过账期还没到账会自动标逾期。
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={onConfirm}>
+            <CheckCircle2 size={13} /> 客户确认收货了 · 记应收{net > 0 ? ` ${money(net)}` : ''}
+          </Button>
+          <span className="text-[10px] text-ink-400">金额按剩余待收预填，可改</span>
+        </div>
+        <button
+          onClick={onManual}
+          className="mt-2 text-[10px] text-ink-400 underline decoration-dotted hover:text-ink-600"
+        >
+          收定金或分几次结？手动添加
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// 中介项目的收款空态：强调「就一笔」，而不是引导用户去拆分期。
+// 两种记法：要盯的提前记约定日（超时自动标逾期）；
+// 平台自动确认、稳到账的，等钱到了直接记一笔已收。
 function BrokerEmptyState({
   net,
   broker,
   onAdd,
+  onInstant,
   onDivide,
 }: {
   net: number
   broker?: string
   onAdd: () => void
+  onInstant: () => void
   onDivide: () => void
 }) {
   return (
@@ -427,10 +536,14 @@ function BrokerEmptyState({
           <Button size="sm" onClick={onAdd}>
             <Plus size={13} /> 记中介结款{net > 0 ? ` ${money(net)}` : ''}
           </Button>
-          <span className="text-[10px] text-ink-400">
-            金额已按净额填好，只需选个约定日期
-          </span>
+          <Button size="sm" variant="outline" onClick={onInstant}>
+            <CheckCircle2 size={13} /> 钱已到账 · 直接记已收
+          </Button>
         </div>
+        <p className="mt-1.5 text-[10px] leading-relaxed text-ink-400">
+          左边提前记好约定日期，到点没到账自动标逾期；像平台自动确认收货、次月必结的，
+          用右边等钱到了记一笔就行。
+        </p>
         <button
           onClick={onDivide}
           className="mt-2 text-[10px] text-ink-400 underline decoration-dotted hover:text-ink-600"

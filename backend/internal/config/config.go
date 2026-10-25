@@ -19,6 +19,8 @@ type Config struct {
 	UploadDir string
 	// 单张图片大小上限（字节），默认 10MB
 	MaxUploadBytes int64
+	// 备份包导入大小上限（字节），默认 2GB。导出不受限（流式写出）。
+	MaxBackupUploadBytes int64
 }
 
 func env(key, def string) string {
@@ -37,6 +39,10 @@ func Load() *Config {
 	if maxMB <= 0 {
 		maxMB = 10
 	}
+	backupMB, _ := strconv.Atoi(env("MAX_BACKUP_UPLOAD_MB", "2048"))
+	if backupMB <= 0 {
+		backupMB = 2048
+	}
 	return &Config{
 		Addr:       env("ADDR", ":8080"),
 		DBPath:     env("DB_PATH", "./data/workbench.db"),
@@ -49,5 +55,6 @@ func Load() *Config {
 		// 图片放同一个父目录，备份时一个 data/ 目录全带走。
 		UploadDir:      env("UPLOAD_DIR", "./data/uploads"),
 		MaxUploadBytes: int64(maxMB) * 1024 * 1024,
+		MaxBackupUploadBytes: int64(backupMB) * 1024 * 1024,
 	}
 }

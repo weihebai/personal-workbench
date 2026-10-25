@@ -92,12 +92,16 @@ export interface Payment {
   title: string
   amount: number
   status: 'pending' | 'received' | 'overdue'
+  /** 确认收货日：没填约定日时，从这天起算账期 */
+  confirmDate?: string | null
   planDate?: string | null
   paidDate?: string | null
   note: string
   /** 约定日已过但还没到账，由后端按日期算出来 */
   overdue?: boolean
   daysLate?: number
+  /** 生效到期日：约定日，没填则按确认收货+账期推，由后端算出来 */
+  dueDate?: string | null
   projectName?: string
 }
 
@@ -107,9 +111,11 @@ export interface Task {
   desc: string
   projectId?: number | null
   clientId?: number | null
-  status: 'todo' | 'doing' | 'done' | 'canceled'
+  status: 'todo' | 'doing' | 'review' | 'done' | 'canceled'
   priority: 'low' | 'normal' | 'high' | 'urgent'
   kind: string
+  /** 验收标准：一行一条，任务完成的判定依据。AI 完成后流转到 review 待人工验收 */
+  acceptCriteria: string
   dueDate?: string | null
   remindDays: number
   estimateMinutes: number

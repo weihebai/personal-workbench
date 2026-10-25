@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,9 @@ import (
 type Handler struct {
 	DB  *gorm.DB
 	Cfg *config.Config
+
+	// 备份导入是「清空再灌入」的全量替换，进行中不允许第二个并发导入
+	backupMu sync.Mutex
 }
 
 func New(db *gorm.DB, cfg *config.Config) *Handler { return &Handler{DB: db, Cfg: cfg} }

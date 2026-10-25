@@ -118,6 +118,82 @@ pnpm dev                     # http://localhost:5173，已配置 /api 代理
 
 ---
 
+## MCP：让 AI 管理项目和任务
+
+工作台内置 MCP（Model Context Protocol）端点，AI 客户端（Claude、ZCode、Cursor 等）
+连上之后就能直接查询/创建/编辑项目和任务。工具经 `internal/mcpbridge` 走 HTTP API 操作数据，
+数据库零侵入。
+
+| 工具 | 说明 |
+|---|---|
+| `list_projects` | 列项目（合同额/已收/抽成汇总），支持按状态、类型、关键词过滤 |
+| `get_project` | 项目详情（含收款记录、任务、里程碑） |
+| `create_project` | 创建项目 |
+| `update_project` | 编辑项目，**只提交的字段会更新**，其他字段不受影响 |
+| `list_tasks` | 列任务，支持按项目/状态/优先级/逾期过滤 |
+| `create_task` | 创建任务（可关联项目） |
+| `update_task` | 编辑任务（改状态、优先级、截止日等）。AI 完成后只允许流转到「待验收」，`done` 由人工设置 |
+| `get_task_attachments` | 读取任务上的截图，以图片返回给 AI（处理打回、看现场截图时用） |
+
+没有删除类工具——AI 误操作的代价不可控，删除请在页面里手动做。
+
+### 方式一：远程连接（推荐）
+
+令牌在**工作台设置页 → MCP 连接**里生成和管理（存设置表，可随时重置/清除），
+页面上一键复制一段配置文案，粘贴给 AI 即可让它代为配置。兼容老用法：`.env` 里的
+`MCP_TOKEN`（生成：`openssl rand -hex 32`）作为兜底，两者都没有时端点返回 401（默认关闭）。
+
+客户端按「远程 MCP / Custom Connector」添加：
+
+- **URL**：`https://<你的域名>/mcp`
+- **请求头**：`Authorization: Bearer <令牌>`
+
+以 mcpServers JSON 格式的客户端（Cursor/ZCode 等）为例：
+
+```json
+{
+  "mcpServers": {
+    "personal-workbench": {
+      "url": "https://<你的域名>/mcp",
+      "headers": { "Authorization": "Bearer <MCP_TOKEN>" }
+    }
+  }
+}
+```
+
+Claude Desktop / Claude 用「设置 → Connectors → 添加自定义连接器」，填 URL 和上面的请求头即可。
+不设置 `MCP_TOKEN` 时 `/mcp` 路由不注册，端点默认关闭。
+
+### 方式二：本地 stdio（不走公网）
+
+`backend/cmd/mcp` 是一个独立的小程序，工作方式是客户端启动时自动拉起它，通过 `WORKBENCH_URL`
+访问工作台（本地或线上都行）：
+
+```bash
+cd backend && go build -o bin/mcp ./cmd/mcp   # Windows 得到 bin/mcp.exe
+```
+
+```json
+{
+  "mcpServers": {
+    "personal-workbench": {
+      "command": "backend/bin/mcp.exe",
+      "env": {
+        "WORKBENCH_URL": "https://<你的域名>",
+        "WORKBENCH_USER": "admin",
+        "WORKBENCH_PASS": "你的密码"
+      }
+    }
+  }
+}
+```
+
+两种方式验证方法一样：问 AI「我有哪些项目进行中」，能列出来说明链路通了。
+
+---
+
+
+
 ## 生产部署（Cloudflare Tunnel）
 
 **前提**：一台有 Docker 的服务器，域名已托管在 Cloudflare。
@@ -215,7 +291,22 @@ volumes:
 
 ### 4. 备份与恢复
 
-#### 备份
+#### 一键备份（推荐）
+
+设置页「备份与迁移」可以在线导出一个 zip 备份包（完整数据库 + 全部图片），
+不用停机、不用进容器，恢复时在任意部署的设置页导入即可：
+
+- **导出**：`GET /api/backup/export`，后台用 `VACUUM INTO` 生成 SQLite 一致性快照再打包，
+  WAL 模式下在线执行，不阻塞正常读写，软删记录、密码哈希都会原样保留
+- **导入**：`POST /api/backup/import`，上传备份包后**整库覆盖**当前数据。
+  校验（zip 完整性、SQLite `quick_check`、表结构齐全）全部通过后，
+  在单个事务里完成替换，失败自动回滚，现有数据不受影响
+
+> ⚠️ 导入是覆盖式操作，不可恢复，导入前建议先导出一份当前数据。
+> 经 Cloudflare Tunnel 访问时受其单请求 100MB 上限约束，更大的备份包请走内网直连。
+> JWT 密钥不包含在备份包里：迁移后用备份里的账号重新登录即可。
+
+#### 手工备份（停机）
 
 程序**正常停止时会自动把 WAL 合并回主库**，所以最稳妥的方式是停止容器后复制：
 
@@ -260,6 +351,11 @@ docker compose up -d
 
 ### 5. 迁移到新服务器
 
+**方式一：备份包导入（推荐）**。旧服务器设置页「导出备份」拿到 zip，新服务器部署好、
+登录后进设置页「导入备份」选择该包，完成。
+
+**方式二：整体拷贝 data/ 目录**（备份包之外的等价做法，适合无法登录旧实例时）：
+
 ```bash
 # 旧机器：停止并打包
 docker compose stop workbench
@@ -286,6 +382,8 @@ docker compose up -d
 | `TOKEN_TTL_HOURS` | `168` | 登录有效期（小时） |
 | `UPLOAD_DIR` | `./data/uploads` | 图片存放目录（和数据库同在 `data/` 下，一起备份） |
 | `MAX_UPLOAD_MB` | `10` | 单张图片大小上限 |
+| `MCP_TOKEN` | 空（关闭） | 设置后开启 `/mcp` 端点（Streamable HTTP），AI 客户端用 `Authorization: Bearer <MCP_TOKEN>` 连接 |
+| `MAX_BACKUP_UPLOAD_MB` | `2048` | 备份包导入大小上限（导出不受限） |
 | `CLOUDFLARE_TUNNEL_TOKEN` | — | Tunnel 令牌 |
 
 ---
@@ -347,6 +445,9 @@ POST   /api/ideas
 PUT    /api/ideas/:id
 PATCH  /api/ideas/:id/status      快速切换状态 / 星级
 DELETE /api/ideas/:id
+
+GET    /api/backup/export         导出备份包（zip：数据库快照 + 全部图片）
+POST   /api/backup/import         导入备份包（multipart: file，整库覆盖，不可恢复）
 ```
 
 除 `/api/auth/login` 与 `/api/health` 外均需 `Authorization: Bearer <token>`。
@@ -371,12 +472,14 @@ DELETE /api/ideas/:id
 ```
 personal-workbench/
 ├── backend/
-│   ├── cmd/server/main.go          入口与路由
+│   ├── cmd/server/main.go          入口与路由（含 /mcp 端点）
+│   ├── cmd/mcp/main.go             独立 MCP 服务器（stdio 本地模式）
 │   └── internal/
 │       ├── auth/                   JWT + 限流
 │       ├── config/                 配置
 │       ├── database/               连接与迁移
 │       ├── handler/                HTTP 处理器
+│       ├── mcpbridge/              MCP 工具集（桥接 API 供 AI 调用）
 │       └── model/                  数据模型
 ├── frontend/
 │   └── src/

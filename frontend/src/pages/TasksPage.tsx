@@ -30,10 +30,15 @@ import {
   ListChecks,
   ArrowRight,
   Copy,
+  ClipboardCheck,
+  Check,
+  Undo2,
+  Loader2,
+  X,
 } from 'lucide-react'
-import { api, errMsg, type Paged, type Task } from '@/lib/api'
+import { api, errMsg, type Paged, type Task, type Attachment } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
-import { Input } from '@/components/ui/Input'
+import { Input, Textarea } from '@/components/ui/Input'
 import { Select, type Option } from '@/components/ui/Select'
 import { ContextMenu, useContextMenu, type MenuItem } from '@/components/ui/ContextMenu'
 import { Badge, Card, EmptyState, PageHeader, Skeleton } from '@/components/ui/Layout'
@@ -61,6 +66,9 @@ const KIND_FILTER: Option[] = [
 const COLUMNS: { key: Task['status']; label: string; accent: string }[] = [
   { key: 'todo', label: '待办', accent: 'bg-ink-400' },
   { key: 'doing', label: '进行中', accent: 'bg-brand-500' },
+  // AI 完成的工作先到这里，人工对着验收标准实测通过才进「已完成」；
+  // 人自己做的任务直接拖进「已完成」，不走验收。
+  { key: 'review', label: '待验收', accent: 'bg-sky-500' },
   { key: 'done', label: '已完成', accent: 'bg-emerald-500' },
 ]
 
@@ -160,7 +168,7 @@ export default function TasksPage() {
 
   const items = data?.items ?? []
   const grouped = useMemo(() => {
-    const g: Record<string, Task[]> = { todo: [], doing: [], done: [], canceled: [] }
+    const g: Record<string, Task[]> = { todo: [], doing: [], review: [], done: [], canceled: [] }
     for (const t of items) (g[t.status] ??= []).push(t)
     return g
   }, [items])
@@ -302,8 +310,8 @@ export default function TasksPage() {
       </div>
 
       {isLoading ? (
-        <div className="grid gap-3 lg:grid-cols-3">
-          {[0, 1, 2].map((i) => (
+        <div className="grid gap-3 lg:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
             <Skeleton key={i} className="h-64" />
           ))}
         </div>
@@ -329,7 +337,7 @@ export default function TasksPage() {
           onDragEnd={handleDragEnd}
           accessibility={{ announcements: ANNOUNCEMENTS }}
         >
-          <div className="grid items-start gap-2.5 lg:grid-cols-3">
+          <div className="grid items-start gap-2.5 lg:grid-cols-4">
             {COLUMNS.map((col) => (
               <BoardColumn key={col.key} col={col} count={grouped[col.key]?.length ?? 0}>
                 {(grouped[col.key] ?? []).map((t) => (
@@ -344,6 +352,10 @@ export default function TasksPage() {
                     onEdit={() => setEditing(t)}
                     onDelete={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
                     onContextMenu={(e) => openCtx(e, t)}
+                    onAccept={() => patch.mutate({ id: t.id, body: { status: 'done' } })}
+                    onReject={(reason) =>
+                      patch.mutate({ id: t.id, body: { status: 'doing', note: withRejectNote(t.note, reason) } })
+                    }
                   />
                 ))}
               </BoardColumn>
@@ -445,6 +457,16 @@ export default function TasksPage() {
                     {open && (
                       <tr className="border-b border-[var(--border)] bg-ink-50/30">
                         <td colSpan={6} className="px-3 pb-2 pt-0">
+                          {t.acceptCriteria && <AcceptCriteria text={t.acceptCriteria} />}
+                          {t.status === 'review' && (
+                            <ReviewActions
+                              taskId={t.id}
+                              onAccept={() => patch.mutate({ id: t.id, body: { status: 'done' } })}
+                              onReject={(reason) =>
+                                patch.mutate({ id: t.id, body: { status: 'doing', note: withRejectNote(t.note, reason) } })
+                              }
+                            />
+                          )}
                           <TaskSteps task={t} dense />
                         </td>
                       </tr>
@@ -526,6 +548,8 @@ function TaskCard({
   onEdit,
   onDelete,
   onContextMenu,
+  onAccept,
+  onReject,
 }: {
   task: Task
   /** 拖动时的那份副本：不参与拖拽逻辑，按钮也不可点 */
@@ -536,6 +560,9 @@ function TaskCard({
   onEdit: () => void
   onDelete: () => void
   onContextMenu?: (e: React.MouseEvent) => void
+  /** 待验收卡片的就地验收动作 */
+  onAccept?: () => void
+  onReject?: (reason: string) => void
 }) {
   const ps = dictOf(TASK_PRIORITY, task.priority)
   const overdue = task.dueState === 'overdue'
@@ -595,6 +622,7 @@ function TaskCard({
           type="checkbox"
           checked={done}
           onChange={onToggle}
+          title={task.status === 'review' ? '勾选 = 验收通过，标记完成' : undefined}
           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-emerald-500"
         />
         <p
@@ -633,6 +661,23 @@ function TaskCard({
         {!overlay && onToggleSteps && (
           <StepsToggle task={task} open={!!stepsOpen} onToggle={onToggleSteps} />
         )}
+        {/* 验收标准条数提示：点一下同样在卡片内展开查看全文 */}
+        {!overlay && onToggleSteps && task.acceptCriteria && (
+          <button
+            type="button"
+            onClick={onToggleSteps}
+            className={cn(
+              'flex items-center gap-0.5 rounded px-1 py-0.5 text-[10px] transition-colors',
+              task.status === 'review'
+                ? 'bg-sky-100 font-medium text-sky-700'
+                : 'text-ink-400 hover:bg-ink-100 hover:text-ink-600',
+            )}
+          >
+            <ClipboardCheck size={9} />
+            {task.status === 'review' ? '待验收' : '验收'}{' '}
+            {task.acceptCriteria.split('\n').filter((s) => s.trim()).length} 条
+          </button>
+        )}
         {task.projectName && (
           <Badge className="border-ink-200 bg-white text-ink-500">
             <FolderKanban size={9} /> {task.projectName}
@@ -645,6 +690,14 @@ function TaskCard({
         )}
       </div>
 
+      {/* 待验收卡片的验收标准常驻显示（验收时就在看这一列），其余状态点开步骤时一起看 */}
+      {!overlay && task.acceptCriteria && (task.status === 'review' || stepsOpen) && (
+        <AcceptCriteria text={task.acceptCriteria} />
+      )}
+      {/* 待验收卡片的就地验收动作：通过 / 打回（打回原因就地填写，可粘贴截图，追加到备注） */}
+      {!overlay && task.status === 'review' && onAccept && onReject && (
+        <ReviewActions taskId={task.id} onAccept={onAccept} onReject={onReject} />
+      )}
       {!overlay && stepsOpen && <TaskSteps task={task} />}
 
       <div className="mt-1.5 flex items-center gap-2.5 text-[10px]">
@@ -668,6 +721,165 @@ function TaskCard({
           <span className="tabular ml-auto font-semibold text-emerald-600">¥{task.budget}</span>
         )}
       </div>
+    </div>
+  )
+}
+
+// 打回原因追加到备注末尾，不覆盖 AI 留下的交付物与自检记录
+function withRejectNote(note: string, reason: string) {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const base = note.trimEnd()
+  return `${base ? base + '\n\n' : ''}──────\n【打回 ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}】${reason}`
+}
+
+// 待验收卡片的就地操作：通过 / 打回。打回在卡片内展开输入框，不用进编辑弹窗；
+// 支持 Ctrl+V 粘贴截图——问题经常一张图才能说清，截图随打回原因一起挂到任务的图片区。
+function ReviewActions({
+  taskId,
+  onAccept,
+  onReject,
+}: {
+  taskId: number
+  onAccept: () => void
+  onReject: (reason: string) => void
+}) {
+  const qc = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [reason, setReason] = useState('')
+  const [imgs, setImgs] = useState<Attachment[]>([])
+  const [pending, setPending] = useState(0)
+  const [err, setErr] = useState('')
+
+  const uploadImgs = async (files: File[]) => {
+    const images = files.filter((f) => f.type.startsWith('image/'))
+    if (!images.length) return
+    setErr('')
+    setPending((n) => n + images.length)
+    for (const f of images) {
+      const fd = new FormData()
+      fd.append('file', f)
+      fd.append('taskId', String(taskId))
+      try {
+        const a = (await api.post<Attachment>('/attachments', fd)).data
+        setImgs((prev) => [...prev, a])
+        qc.invalidateQueries({ queryKey: ['attachments'] })
+      } catch (e) {
+        setErr(errMsg(e, '截图上传失败'))
+      } finally {
+        setPending((n) => n - 1)
+      }
+    }
+  }
+
+  const removeImg = async (id: number) => {
+    setImgs((prev) => prev.filter((x) => x.id !== id))
+    await api.delete(`/attachments/${id}`)
+    qc.invalidateQueries({ queryKey: ['attachments'] })
+  }
+
+  if (editing) {
+    const confirmReject = () => {
+      const suffix = imgs.length ? `（附截图 ${imgs.length} 张，见图片区）` : ''
+      onReject(reason.trim() + suffix)
+      setEditing(false)
+      setReason('')
+      setImgs([])
+    }
+    return (
+      <div className="mt-1.5 rounded-md border border-amber-200 bg-amber-50/60 p-2">
+        <Textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData?.files ?? []).filter((f) => f.type.startsWith('image/'))
+            if (files.length) {
+              e.preventDefault()
+              uploadImgs(files)
+            }
+          }}
+          rows={2}
+          autoFocus
+          placeholder="哪条标准不过、现象是什么；截图可直接 Ctrl+V 粘进来"
+        />
+        {imgs.length > 0 && (
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {imgs.map((a) => (
+              <div key={a.id} className="group relative">
+                <a href={a.url} target="_blank" rel="noreferrer">
+                  <img
+                    src={a.url}
+                    alt={a.name}
+                    className="h-10 w-10 rounded border border-[var(--border)] object-cover"
+                  />
+                </a>
+                <button
+                  type="button"
+                  onClick={() => removeImg(a.id)}
+                  aria-label="移除截图"
+                  className="absolute -right-1 -top-1 rounded-full bg-ink-900/80 p-0.5 text-white opacity-0 transition-opacity hover:bg-red-600 group-hover:opacity-100"
+                >
+                  <X size={8} />
+                </button>
+              </div>
+            ))}
+            {pending > 0 && (
+              <span className="flex h-10 items-center gap-1 text-[10px] text-ink-400">
+                <Loader2 size={11} className="animate-spin" /> 上传中
+              </span>
+            )}
+          </div>
+        )}
+        {err && <p className="mt-1 text-[11px] text-red-600">{err}</p>}
+        <div className="mt-1.5 flex justify-end gap-1.5">
+          <Button size="sm" variant="ghost" onClick={() => { setEditing(false); setReason(''); setErr('') }}>
+            取消
+          </Button>
+          <Button
+            size="sm"
+            variant="danger"
+            disabled={!reason.trim() || pending > 0}
+            onClick={confirmReject}
+          >
+            {pending > 0 ? <Loader2 size={12} className="animate-spin" /> : null}
+            确认打回{imgs.length ? `（含 ${imgs.length} 张截图）` : ''}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="mt-1.5 flex gap-1.5">
+      <Button size="sm" onClick={onAccept}>
+        <Check size={12} /> 验收通过
+      </Button>
+      <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+        <Undo2 size={12} /> 打回
+      </Button>
+    </div>
+  )
+}
+
+// 验收标准块：一行一条编号列出。待验收时人工对着这里逐条实测。
+function AcceptCriteria({ text }: { text: string }) {
+  const lines = text
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (!lines.length) return null
+  return (
+    <div className="mt-1.5 rounded-md border border-sky-200 bg-sky-50/60 px-2 py-1.5">
+      <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold text-sky-700">
+        <ClipboardCheck size={10} /> 验收标准 · 逐条实测通过后标记完成
+      </p>
+      <ul className="space-y-0.5">
+        {lines.map((l, i) => (
+          <li key={i} className="flex gap-1 text-[10px] leading-relaxed text-sky-900">
+            <span className="shrink-0 text-sky-400">{i + 1}.</span>
+            <span className="min-w-0 break-words">{l}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }

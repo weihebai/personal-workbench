@@ -14,6 +14,8 @@ services:
       ADMIN_PASS: ${ADMIN_PASS:-admin123}
       JWT_SECRET: ${JWT_SECRET:-}
       TOKEN_TTL_HOURS: ${TOKEN_TTL_HOURS:-168}
+      # MCP 端点（AI 客户端连 /mcp），留空 = 关闭
+      MCP_TOKEN: ${MCP_TOKEN:-}
     volumes:
       # 数据全部落在宿主机，容器无状态：删容器/换镜像都不丢数据。
       # 默认 ./data（相对 compose 文件所在目录），生产建议在 .env 里设绝对路径：

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -163,8 +164,9 @@ func (h *Handler) ListProjects(c *gin.Context) {
 	if s := c.Query("kind"); s != "" {
 		q = q.Where("kind = ?", s)
 	}
+	// status 支持逗号分隔多选：status=active,negotiating（页面上的状态 chips 多选）
 	if s := c.Query("status"); s != "" {
-		q = q.Where("status = ?", s)
+		q = q.Where("status IN ?", strings.Split(s, ","))
 	}
 	if s := c.Query("clientId"); s != "" {
 		if id := queryUint(c, "clientId"); id != nil {
@@ -296,7 +298,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 
 	var payments []model.Payment
 	h.DB.Where("project_id = ?", id).Order("plan_date ASC").Find(&payments)
-	decoratePayments(payments)
+	decoratePayments(payments, h.paymentCreditDays())
 	var tasks []model.Task
 	h.DB.Where("project_id = ?", id).Order("created_at DESC").Limit(50).Find(&tasks)
 	var client *model.Client
@@ -375,26 +377,61 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		notFound(c, "项目不存在")
 		return
 	}
-	var in projectInput
-	if err := c.ShouldBindJSON(&in); err != nil {
+
+	// 支持部分字段更新（右键快捷改状态只发 {status}），
+	// 表单保存仍会带上全部字段，两条路径共用这一个接口
+	var raw map[string]any
+	if err := c.ShouldBindJSON(&raw); err != nil {
 		badRequest(c, "参数错误")
 		return
 	}
-	updates := map[string]any{
-		"name": in.Name, "kind": in.Kind, "status": in.Status, "summary": in.Summary,
-		"source_path": in.SourcePath, "online_url": in.OnlineURL, "admin_url": in.AdminURL,
-		"git_repo": in.GitRepo, "deploy_at": in.DeployAt, "tech_stack": in.TechStack,
-		"client_id": in.ClientID, "quote": in.Quote, "cost": in.Cost,
-		"commission_type": in.CommissionType, "commission_rate": in.CommissionRate, "broker": in.Broker,
-		"start_date": mustParseDate(in.StartDate), "due_date": mustParseDate(in.DueDate),
-		"estimate_minutes": in.EstimateMinutes, "actual_minutes": in.ActualMinutes,
-		"note": in.Note,
+	updates := map[string]any{}
+	strFields := map[string]string{
+		"name": "name", "kind": "kind", "status": "status", "summary": "summary",
+		"sourcePath": "source_path", "onlineUrl": "online_url", "adminUrl": "admin_url",
+		"gitRepo": "git_repo", "deployAt": "deploy_at", "techStack": "tech_stack",
+		"commissionType": "commission_type", "broker": "broker", "note": "note",
 	}
-	if err := h.DB.Model(&cur).Updates(updates).Error; err != nil {
-		serverErr(c, err)
-		return
+	for js, col := range strFields {
+		if v, ok := raw[js]; ok {
+			updates[col] = v
+		}
 	}
-	h.syncTags("project", id, in.Tags)
+	numFields := map[string]string{
+		"quote": "quote", "cost": "cost", "commissionRate": "commission_rate",
+		"estimateMinutes": "estimate_minutes", "actualMinutes": "actual_minutes",
+	}
+	for js, col := range numFields {
+		if v, ok := raw[js]; ok {
+			updates[col] = v
+		}
+	}
+	if v, ok := raw["clientId"]; ok {
+		updates["client_id"] = v
+	}
+	dateFields := map[string]string{"startDate": "start_date", "dueDate": "due_date"}
+	for js, col := range dateFields {
+		if v, ok := raw[js]; ok {
+			s, _ := v.(string)
+			updates[col] = mustParseDate(s)
+		}
+	}
+	if len(updates) > 0 {
+		if err := h.DB.Model(&cur).Updates(updates).Error; err != nil {
+			serverErr(c, err)
+			return
+		}
+	}
+	// 标签只在显式传来时才同步，避免只改状态时把标签清掉
+	if arr, ok := raw["tags"].([]any); ok {
+		names := make([]string, 0, len(arr))
+		for _, t := range arr {
+			if s, ok := t.(string); ok {
+				names = append(names, s)
+			}
+		}
+		h.syncTags("project", id, names)
+	}
 	var fresh model.Project
 	h.DB.First(&fresh, id)
 	list := []model.Project{fresh}
@@ -453,21 +490,44 @@ func (h *Handler) syncTags(target string, targetID uint, tags []string) {
 
 // ---------- 收款 ----------
 
-// 派生收款状态：约定日已过且还没到账 → 逾期。
+// defaultCreditDays 收款账期：确认收货后多少天没到账就算逾期（可在设置里调）
+const defaultCreditDays = 7
+
+func (h *Handler) paymentCreditDays() int {
+	var s model.Setting
+	if h.DB.Where("`key` = ?", "paymentCreditDays").First(&s).Error == nil {
+		if n, err := strconv.Atoi(strings.TrimSpace(s.Value)); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultCreditDays
+}
+
+// 派生收款状态：到期日已过且还没到账 → 逾期。
+// 到期日取「约定收款日」；没填约定日但记了确认收货日的，按确认收货 + 账期推算。
 // 「中介说下个月结」这类口头约定，到点没到账必须能一眼看出来，
 // 否则只能靠人记性，这正是这个功能存在的意义。
-func decoratePayments(items []model.Payment) {
+func decoratePayments(items []model.Payment, creditDays int) {
 	today := time.Now()
 	today = time.Date(today.Year(), today.Month(), today.Day(), 0, 0, 0, 0, today.Location())
 	for i := range items {
 		p := &items[i]
-		if p.Status == "received" || p.PlanDate == nil {
+		due := p.PlanDate
+		if due == nil && p.ConfirmDate != nil {
+			d := p.ConfirmDate.AddDate(0, 0, creditDays)
+			due = &d
+		}
+		// 归一化到当天 00:00，约定日带时分秒时也不会因为「今天 00:00 < 现在」误判
+		if due != nil {
+			d := time.Date(due.Year(), due.Month(), due.Day(), 0, 0, 0, 0, due.Location())
+			p.DueDate = &d
+		}
+		if p.Status == "received" || p.DueDate == nil {
 			continue
 		}
-		plan := time.Date(p.PlanDate.Year(), p.PlanDate.Month(), p.PlanDate.Day(), 0, 0, 0, 0, today.Location())
-		if plan.Before(today) {
+		if p.DueDate.Before(today) {
 			p.Overdue = true
-			p.DaysLate = int(today.Sub(plan).Hours() / 24)
+			p.DaysLate = int(today.Sub(*p.DueDate).Hours() / 24)
 		}
 	}
 }
@@ -512,19 +572,20 @@ func (h *Handler) ListPayments(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
-	decoratePayments(items)
+	decoratePayments(items, h.paymentCreditDays())
 	h.fillPaymentProjectNames(items)
 	c.JSON(http.StatusOK, paginated(items, total, page, size))
 }
 
 type paymentInput struct {
-	ProjectID uint    `json:"projectId"`
-	Title     string  `json:"title"`
-	Amount    float64 `json:"amount"`
-	Status    string  `json:"status"`
-	PlanDate  string  `json:"planDate"`
-	PaidDate  string  `json:"paidDate"`
-	Note      string  `json:"note"`
+	ProjectID   uint    `json:"projectId"`
+	Title       string  `json:"title"`
+	Amount      float64 `json:"amount"`
+	Status      string  `json:"status"`
+	ConfirmDate string  `json:"confirmDate"`
+	PlanDate    string  `json:"planDate"`
+	PaidDate    string  `json:"paidDate"`
+	Note        string  `json:"note"`
 }
 
 func (h *Handler) CreatePayment(c *gin.Context) {
@@ -545,7 +606,8 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 	}
 	p := model.Payment{
 		ProjectID: in.ProjectID, Title: in.Title, Amount: in.Amount,
-		Status: in.Status, PlanDate: mustParseDate(in.PlanDate),
+		Status: in.Status, ConfirmDate: mustParseDate(in.ConfirmDate),
+		PlanDate: mustParseDate(in.PlanDate),
 		PaidDate: mustParseDate(in.PaidDate), Note: in.Note,
 	}
 	if p.Status == "" {
@@ -579,7 +641,8 @@ func (h *Handler) UpdatePayment(c *gin.Context) {
 	}
 	updates := map[string]any{
 		"title": in.Title, "amount": in.Amount, "status": in.Status,
-		"plan_date": mustParseDate(in.PlanDate), "paid_date": mustParseDate(in.PaidDate),
+		"confirm_date": mustParseDate(in.ConfirmDate),
+		"plan_date":    mustParseDate(in.PlanDate), "paid_date": mustParseDate(in.PaidDate),
 		"note": in.Note,
 	}
 	if in.Status == "received" && cur.PaidDate == nil && in.PaidDate == "" {
