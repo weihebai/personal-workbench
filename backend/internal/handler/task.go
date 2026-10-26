@@ -124,6 +124,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 type taskInput struct {
 	Title           string  `json:"title"`
 	Desc            string  `json:"desc"`
+	AcceptCriteria  string  `json:"acceptCriteria"`
 	ProjectID       *uint   `json:"projectId"`
 	ClientID        *uint   `json:"clientId"`
 	Status          string  `json:"status"`
@@ -148,7 +149,8 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		return
 	}
 	t := model.Task{
-		Title: in.Title, Desc: in.Desc, ProjectID: in.ProjectID, ClientID: in.ClientID,
+		Title: in.Title, Desc: in.Desc, AcceptCriteria: in.AcceptCriteria,
+		ProjectID: in.ProjectID, ClientID: in.ClientID,
 		Status: in.Status, Priority: in.Priority, Kind: in.Kind,
 		DueDate: mustParseDate(in.DueDate), RemindDays: in.RemindDays,
 		EstimateMinutes: in.EstimateMinutes, ActualMinutes: in.ActualMinutes,
@@ -188,7 +190,7 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
-	strFields := map[string]string{"title": "title", "desc": "desc", "status": "status", "priority": "priority", "kind": "kind", "note": "note"}
+	strFields := map[string]string{"title": "title", "desc": "desc", "status": "status", "priority": "priority", "kind": "kind", "note": "note", "acceptCriteria": "accept_criteria"}
 	for js, col := range strFields {
 		if v, ok := raw[js]; ok {
 			updates[col] = v

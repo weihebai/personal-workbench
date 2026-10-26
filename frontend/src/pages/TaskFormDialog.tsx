@@ -18,6 +18,7 @@ export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: 
   const [form, setForm] = useState({
     title: task?.title ?? '',
     desc: task?.desc ?? '',
+    acceptCriteria: task?.acceptCriteria ?? '',
     projectId: task?.projectId ? String(task.projectId) : '',
     clientId: task?.clientId ? String(task.clientId) : '',
     status: task?.status ?? 'todo',
@@ -156,6 +157,21 @@ export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: 
         <Field label="描述">
           <Textarea value={form.desc} onChange={set('desc')} rows={2} />
         </Field>
+        <Field
+          label="验收标准"
+          hint="一行一条；AI 完成的任务会先进入「待验收」，对着这里逐条实测后再标记完成"
+        >
+          <Textarea
+            value={form.acceptCriteria}
+            onChange={set('acceptCriteria')}
+            rows={2}
+            placeholder={'如：\n页面 /login 可正常登录并跳转\n接口返回 200 且无控制台报错'}
+          />
+        </Field>
+        {/* 备注紧跟验收标准：AI 的交付物和自检记录都写在这里，验收时一眼能对照 */}
+        <Field label="备注">
+          <Textarea value={form.note} onChange={set('note')} rows={2} />
+        </Field>
 
         {/* 步骤清单：新建时没有任务 id，存完才能挂步骤，所以只在编辑时出现 */}
         {isEdit && (
@@ -180,10 +196,6 @@ export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: 
             <AttachmentGallery taskId={task!.id} enablePaste />
           </div>
         )}
-
-        <Field label="备注">
-          <Textarea value={form.note} onChange={set('note')} rows={2} />
-        </Field>
         {err && (
           <div className="rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-600">{err}</div>
         )}

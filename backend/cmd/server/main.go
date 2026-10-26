@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,9 +20,11 @@ import (
 	"personal-workbench/internal/config"
 	"personal-workbench/internal/database"
 	"personal-workbench/internal/handler"
+	"personal-workbench/internal/mcpbridge"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func main() {
@@ -127,6 +131,9 @@ func main() {
 			authed.PUT("/payments/:id", h.UpdatePayment)
 			authed.DELETE("/payments/:id", h.DeletePayment)
 
+			authed.GET("/settings", h.GetSettings)
+			authed.PUT("/settings", h.UpdateSettings)
+
 			authed.GET("/tasks", h.ListTasks)
 			authed.POST("/tasks", h.CreateTask)
 			authed.PUT("/tasks/:id", h.UpdateTask)
@@ -168,8 +175,38 @@ func main() {
 			authed.PUT("/ideas/:id", h.UpdateIdea)
 			authed.PATCH("/ideas/:id/status", h.QuickIdeaStatus)
 			authed.DELETE("/ideas/:id", h.DeleteIdea)
+
+			// 备份与迁移：导出 = 数据库快照 + 全部图片打成一个 zip；
+			// 导入 = 用备份包整库覆盖（换服务器迁移用，见 handler/backup.go）
+			authed.GET("/backup/export", h.ExportBackup)
+			authed.POST("/backup/import", h.ImportBackup)
+
+			// MCP 连接设置（设置页展示/重置令牌）
+			authed.GET("/settings/mcp", h.GetMcpSetting)
+			authed.PUT("/settings/mcp", h.UpdateMcpSetting)
 		}
 	}
+
+	// MCP（Streamable HTTP）：AI 客户端连 https://<域名>/mcp，请求带
+	// Authorization: Bearer <令牌>。令牌在设置页生成（存设置表），MCP_TOKEN 环境变量兜底；
+	// 两者都没有时端点返回 401，等效关闭。
+	wb := mcpbridge.NewClient("http://127.0.0.1"+selfPort(cfg.Addr), cfg.AdminUser, cfg.AdminPass)
+	server := mcp.NewServer(&mcp.Implementation{Name: "personal-workbench", Version: "0.1.0"}, nil)
+	mcpbridge.RegisterTools(server, wb)
+	mux := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)
+	r.Any("/mcp", func(c *gin.Context) {
+		tok := h.McpToken()
+		if tok == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "MCP 未启用：请先在工作台设置页生成令牌"})
+			return
+		}
+		// 常量时间比对，避免令牌的时序侧信道
+		if subtle.ConstantTimeCompare([]byte(c.GetHeader("Authorization")), []byte("Bearer "+tok)) != 1 {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
+			return
+		}
+		mux.ServeHTTP(c.Writer, c.Request)
+	})
 
 	// 生产环境由后端托管前端静态资源（Docker 单容器部署）
 	if staticDir := os.Getenv("STATIC_DIR"); staticDir != "" {
@@ -227,4 +264,13 @@ func main() {
 		log.Println("数据库已关闭，WAL 已合并")
 	}
 	log.Println("服务已退出")
+}
+
+// selfPort 把监听地址转成 loopback 自访地址：":8080" / "0.0.0.0:8080" → ":8080"。
+// MCP 工具在同进程内走 loopback 调 API，用这个拼出 http://127.0.0.1:port。
+func selfPort(addr string) string {
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return ":" + port
+	}
+	return addr
 }

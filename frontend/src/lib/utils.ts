@@ -75,6 +75,8 @@ export const PROJECT_STATUS = {
 export const TASK_STATUS = {
   todo: { label: '待办', color: 'bg-ink-400', soft: 'bg-ink-100 text-ink-600 border-ink-200' },
   doing: { label: '进行中', color: 'bg-brand-500', soft: 'bg-brand-50 text-brand-700 border-brand-200' },
+  // 待验收：AI 完成后流转到这里，人工对着验收标准实测通过才置 done
+  review: { label: '待验收', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
   done: { label: '已完成', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   canceled: { label: '已取消', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-400 border-ink-200' },
 } as const

@@ -18,3 +18,7 @@ PixPin_*.png
 
 # logo / 品牌设计的探索稿与渲染图，只在本地保留，不进仓库
 brand/
+
+# agent 会话工作区（计划稿等）与本地构建产物
+.zcode/
+*.exe

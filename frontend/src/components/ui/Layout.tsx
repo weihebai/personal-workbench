@@ -35,14 +35,15 @@ export function Card({
   className,
   padding = true,
   id,
+  ...rest
 }: {
   children: React.ReactNode
   className?: string
   padding?: boolean
   id?: string
-}) {
+} & React.HTMLAttributes<HTMLDivElement>) {
   return (
-    <div id={id} className={cn('card', padding && 'p-3.5', className)}>
+    <div id={id} className={cn('card', padding && 'p-3.5', className)} {...rest}>
       {children}
     </div>
   )

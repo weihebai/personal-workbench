@@ -19,6 +19,10 @@ export function PaymentFormDialog({
   defaultProjectId,
   defaultTitle,
   defaultAmount,
+  defaultConfirmDate,
+  defaultStatus,
+  defaultPaidDate,
+  confirmDelivery,
   hintText,
   onClose,
 }: {
@@ -26,6 +30,11 @@ export function PaymentFormDialog({
   defaultProjectId?: number
   defaultTitle?: string
   defaultAmount?: number
+  defaultConfirmDate?: string
+  defaultStatus?: 'pending' | 'received'
+  defaultPaidDate?: string
+  /** 确认收货的快捷路径：保存后把项目状态一并切成「已交付」 */
+  confirmDelivery?: boolean
   hintText?: string
   onClose: () => void
 }) {
@@ -35,9 +44,10 @@ export function PaymentFormDialog({
     projectId: String(payment?.projectId ?? defaultProjectId ?? ''),
     title: payment?.title ?? defaultTitle ?? '',
     amount: payment?.amount ? String(payment.amount) : defaultAmount ? String(defaultAmount) : '',
-    status: payment?.status ?? 'pending',
+    status: payment?.status ?? defaultStatus ?? 'pending',
+    confirmDate: toDateInput(payment?.confirmDate ?? defaultConfirmDate ?? null),
     planDate: toDateInput(payment?.planDate),
-    paidDate: toDateInput(payment?.paidDate),
+    paidDate: toDateInput(payment?.paidDate ?? defaultPaidDate ?? null),
     note: payment?.note ?? '',
   })
   const [err, setErr] = useState('')
@@ -62,7 +72,16 @@ export function PaymentFormDialog({
       if (isEdit) return (await api.put(`/payments/${payment!.id}`, payload)).data
       return (await api.post('/payments', payload)).data
     },
-    onSuccess: () => {
+    onSuccess: async () => {
+      // 「确认收货」快捷路径：收款记上的同时，项目推进到已交付。
+      // 已结款/已暂停等状态不倒退，只有还挂着「进行中/洽谈中」才推。
+      if (confirmDelivery && form.projectId) {
+        const pid = Number(form.projectId)
+        const detail = await api.get<{ project: Project }>(`/projects/${pid}`)
+        if (['active', 'negotiating'].includes(detail.data.project.status)) {
+          await api.put(`/projects/${pid}`, { status: 'delivered' })
+        }
+      }
       qc.invalidateQueries({ queryKey: ['payments'] })
       qc.invalidateQueries({ queryKey: ['projects'] })
       qc.invalidateQueries({ queryKey: ['project'] })
@@ -116,19 +135,22 @@ export function PaymentFormDialog({
           />
         </Field>
         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-          <Field label="款项名称" hint="首款 / 中期款 / 尾款">
+          <Field label="款项名称" hint="验收结款 / 首款 / 中介结款">
             <Input value={form.title} onChange={set('title')} />
           </Field>
           <Field label="金额" required>
             <Input value={form.amount} onChange={set('amount')} inputMode="decimal" placeholder="0.00" />
           </Field>
+          <Field label="确认收货日" hint="客户/中介点头那天">
+            <DatePicker value={form.confirmDate} onChange={setV('confirmDate')} />
+          </Field>
+          <Field label="约定收款日" hint="可留空，按确认收货后账期算">
+            <DatePicker value={form.planDate} onChange={setV('planDate')} />
+          </Field>
           <Field label="状态">
             <Select value={form.status} onChange={setV('status')} options={STATUS_OPTS} />
           </Field>
-          <Field label="约定收款日">
-            <DatePicker value={form.planDate} onChange={setV('planDate')} />
-          </Field>
-          <Field label="实际到账日" className="col-span-2">
+          <Field label="实际到账日">
             <DatePicker value={form.paidDate} onChange={setV('paidDate')} />
           </Field>
         </div>

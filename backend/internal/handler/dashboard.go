@@ -131,7 +131,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 
 	pendingPayments := []model.Payment{}
 	h.DB.Where("status = ?", "pending").Order("plan_date ASC").Limit(10).Find(&pendingPayments)
-	decoratePayments(pendingPayments)
+	decoratePayments(pendingPayments, h.paymentCreditDays())
 	h.fillPaymentProjectNames(pendingPayments)
 
 	soonReminders := []model.Reminder{}

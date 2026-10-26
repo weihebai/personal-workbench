@@ -59,7 +59,7 @@ func TestDecoratePayments(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			items := []model.Payment{c.p}
-			decoratePayments(items)
+			decoratePayments(items, defaultCreditDays)
 			if items[0].Overdue != c.wantLate {
 				t.Fatalf("Overdue = %v, want %v", items[0].Overdue, c.wantLate)
 			}
@@ -75,8 +75,57 @@ func TestDecoratePaymentsIgnoresTimeOfDay(t *testing.T) {
 	now := time.Now()
 	laterToday := time.Date(now.Year(), now.Month(), now.Day(), 23, 59, 0, 0, now.Location())
 	items := []model.Payment{{Status: "pending", PlanDate: &laterToday}}
-	decoratePayments(items)
+	decoratePayments(items, defaultCreditDays)
 	if items[0].Overdue {
 		t.Fatal("约定日是今天晚些时候，不该判成逾期")
 	}
+}
+
+// 没填约定日、但记了确认收货日的，从确认收货那天起算账期。
+// 「客户确认收货了但拖着不结」就靠这条兜底暴露出来。
+func TestDecoratePaymentsByConfirmDate(t *testing.T) {
+	day := func(off int) *time.Time {
+		now := time.Now()
+		d := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, off)
+		return &d
+	}
+	const credit = 7
+
+	t.Run("确认收货超过账期 → 逾期，逾期天数从推算到期日起算", func(t *testing.T) {
+		items := []model.Payment{{Status: "pending", ConfirmDate: day(-9)}}
+		decoratePayments(items, credit)
+		if !items[0].Overdue || items[0].DaysLate != 2 {
+			t.Fatalf("Overdue = %v, DaysLate = %d, want true/2", items[0].Overdue, items[0].DaysLate)
+		}
+	})
+
+	t.Run("确认收货刚好满账期 → 还不算逾期", func(t *testing.T) {
+		items := []model.Payment{{Status: "pending", ConfirmDate: day(-7)}}
+		decoratePayments(items, credit)
+		if items[0].Overdue {
+			t.Fatal("账期最后一天不该判逾期")
+		}
+		if items[0].DueDate == nil {
+			t.Fatal("DueDate 应该被推算出来")
+		}
+	})
+
+	t.Run("填了约定日就以约定日为准，确认收货日只做兜底", func(t *testing.T) {
+		items := []model.Payment{{Status: "pending", ConfirmDate: day(-30), PlanDate: day(5)}}
+		decoratePayments(items, credit)
+		if items[0].Overdue {
+			t.Fatal("约定日还没到，不该判逾期")
+		}
+		if items[0].DueDate == nil || !items[0].DueDate.Equal(*items[0].PlanDate) {
+			t.Fatalf("DueDate = %v, want 约定日 %v", items[0].DueDate, items[0].PlanDate)
+		}
+	})
+
+	t.Run("已到账不算逾期", func(t *testing.T) {
+		items := []model.Payment{{Status: "received", ConfirmDate: day(-30)}}
+		decoratePayments(items, credit)
+		if items[0].Overdue {
+			t.Fatal("已到账不该判逾期")
+		}
+	})
 }
