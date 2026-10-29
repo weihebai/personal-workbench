@@ -133,7 +133,9 @@ export default function ProjectDetailPage() {
         <Button variant="ghost" size="icon" onClick={() => navigate('/projects')}>
           <ArrowLeft size={16} />
         </Button>
-        <h1 className="truncate text-base font-bold text-ink-900">{p.name}</h1>
+        <h1 className="truncate text-base font-bold text-ink-900" data-private>
+          {p.name}
+        </h1>
         <div className="ml-auto flex gap-1">
           <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
             <Pencil size={13} /> 编辑
@@ -154,7 +156,7 @@ export default function ProjectDetailPage() {
             <Badge key={t}>{t}</Badge>
           ))}
           {data.client && (
-            <Link to="/clients" className="text-[11px] text-sky-600 hover:underline">
+            <Link to="/clients" className="text-[11px] text-sky-600 hover:underline" data-private>
               客户：{data.client.name}
             </Link>
           )}

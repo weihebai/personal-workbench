@@ -15,6 +15,8 @@ import {
   Menu,
   X,
   CornerDownLeft,
+  Eye,
+  EyeOff,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/BrandMark'
@@ -39,8 +41,15 @@ const mobileNav = nav.filter((n) => n.to !== '/clients')
 export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const [searchOpen, setSearchOpen] = useState(false)
+  // 隐私打码：金额、日期、项目/客户名在截图时模糊掉，随时一键切换
+  const [masked, setMasked] = useState(() => localStorage.getItem('wb_privacy_mask') === '1')
   const location = useLocation()
   const navigate = useNavigate()
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('privacy-mode', masked)
+    localStorage.setItem('wb_privacy_mask', masked ? '1' : '0')
+  }, [masked])
 
   const { data } = useQuery({
     queryKey: ['dashboard-badges'],
@@ -168,6 +177,21 @@ export default function AppShell() {
               /
             </kbd>
           </button>
+
+          <button
+            onClick={() => setMasked((v) => !v)}
+            aria-pressed={masked}
+            title={`${masked ? '关闭' : '开启'}隐私打码（Ctrl+Shift+M）`}
+            className={cn(
+              'flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs transition-colors',
+              masked
+                ? 'border-brand-300 bg-brand-50 text-brand-700'
+                : 'border-[var(--border)] bg-white text-ink-400 hover:border-ink-300 hover:text-ink-600',
+            )}
+          >
+            {masked ? <EyeOff size={13} /> : <Eye size={13} />}
+            <span className="hidden sm:inline">{masked ? '已打码' : '打码'}</span>
+          </button>
         </header>
 
         <main className="flex-1 px-3 pb-24 pt-4 sm:px-5 sm:pb-8">
@@ -247,16 +271,22 @@ export default function AppShell() {
       )}
 
       {searchOpen && <SearchOverlay onClose={() => setSearchOpen(false)} />}
-      <GlobalHotkeys onSearch={() => setSearchOpen(true)} />
+      <GlobalHotkeys onSearch={() => setSearchOpen(true)} onToggleMask={() => setMasked((v) => !v)} />
     </div>
   )
 }
 
-function GlobalHotkeys({ onSearch }: { onSearch: () => void }) {
+function GlobalHotkeys({ onSearch, onToggleMask }: { onSearch: () => void; onToggleMask: () => void }) {
   useEffect(() => {
     const fn = (e: KeyboardEvent) => {
       const el = e.target as HTMLElement
       const typing = ['INPUT', 'TEXTAREA', 'SELECT'].includes(el?.tagName) || el?.isContentEditable
+      // 打码在任何地方都能按，包括正在输入时
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'm') {
+        e.preventDefault()
+        onToggleMask()
+        return
+      }
       if (e.key === '/' && !typing) {
         e.preventDefault()
         onSearch()
@@ -264,7 +294,7 @@ function GlobalHotkeys({ onSearch }: { onSearch: () => void }) {
     }
     window.addEventListener('keydown', fn)
     return () => window.removeEventListener('keydown', fn)
-  }, [onSearch])
+  }, [onSearch, onToggleMask])
   return null
 }
 

@@ -63,12 +63,21 @@ export default function ClientsPage() {
           {items.map((c) => (
             <Card key={c.id} className="group flex flex-col gap-1.5">
               <div className="flex items-start gap-2">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700">
+                <div
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-100 text-xs font-bold text-brand-700"
+                  data-private
+                >
                   {c.name.slice(0, 1)}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[13px] font-semibold text-ink-900">{c.name}</p>
-                  {c.contact && <p className="truncate text-[11px] text-ink-400">{c.contact}</p>}
+                  <p className="truncate text-[13px] font-semibold text-ink-900" data-private>
+                    {c.name}
+                  </p>
+                  {c.contact && (
+                    <p className="truncate text-[11px] text-ink-400" data-private>
+                      {c.contact}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
                   <Button variant="ghost" size="icon" onClick={() => setEditing(c)}>
@@ -81,12 +90,16 @@ export default function ClientsPage() {
               </div>
               <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-500">
                 {c.phone && (
-                  <a href={`tel:${c.phone}`} className="flex items-center gap-0.5 hover:text-sky-600">
+                  <a
+                    href={`tel:${c.phone}`}
+                    className="flex items-center gap-0.5 hover:text-sky-600"
+                    data-private
+                  >
                     <Phone size={10} /> {c.phone}
                   </a>
                 )}
                 {c.wechat && (
-                  <span className="flex items-center gap-0.5">
+                  <span className="flex items-center gap-0.5" data-private>
                     <MessageCircle size={10} /> {c.wechat}
                   </span>
                 )}

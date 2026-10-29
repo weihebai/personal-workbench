@@ -35,6 +35,7 @@ import {
   Undo2,
   Loader2,
   X,
+  ChevronDown,
 } from 'lucide-react'
 import { api, errMsg, type Paged, type Task, type Attachment } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -59,6 +60,7 @@ const PRIORITY_FILTER: Option[] = [
 ]
 const KIND_FILTER: Option[] = [
   { value: '', label: '全部归属' },
+  { value: 'company', label: '公司' },
   { value: 'freelance', label: '私活' },
   { value: 'personal', label: '个人' },
 ]
@@ -415,9 +417,26 @@ export default function TasksPage() {
                             {t.title}
                           </span>
                           <StepsToggle task={t} open={open} onToggle={() => toggleSteps(t.id)} />
+                          {/* 只有验收标准、没有步骤的任务也要能点开和收起 */}
+                          {t.acceptCriteria && !(t.subtaskTotal ?? 0) && (
+                            <button
+                              type="button"
+                              onClick={() => toggleSteps(t.id)}
+                              onDoubleClick={(e) => e.stopPropagation()}
+                              aria-expanded={open}
+                              title={open ? '收起验收标准' : '展开验收标准'}
+                              className="inline-flex shrink-0 items-center gap-0.5 rounded border border-ink-200 bg-white px-1 py-0.5 text-[10px] font-medium text-ink-500 transition-colors hover:border-brand-300 hover:text-brand-600"
+                            >
+                              <ClipboardCheck size={9} />
+                              验收 <span className="tabular">{t.acceptCriteria.split('\n').filter((s) => s.trim()).length}</span> 条
+                              <ChevronDown size={9} className={cn('transition-transform', open && 'rotate-180')} />
+                            </button>
+                          )}
                         </div>
                       </td>
-                      <td className="hidden px-2 py-2 text-ink-500 sm:table-cell">{t.projectName || '—'}</td>
+                      <td className="hidden px-2 py-2 text-ink-500 sm:table-cell" data-private>
+                        {t.projectName || '—'}
+                      </td>
                       <td className="px-2 py-2">
                         <Badge soft={ps.soft} dot={ps.color}>
                           {ps.label}
@@ -457,7 +476,7 @@ export default function TasksPage() {
                     {open && (
                       <tr className="border-b border-[var(--border)] bg-ink-50/30">
                         <td colSpan={6} className="px-3 pb-2 pt-0">
-                          {t.acceptCriteria && <AcceptCriteria text={t.acceptCriteria} />}
+                          {t.acceptCriteria && <AcceptCriteria text={t.acceptCriteria} taskId={t.id} />}
                           {t.status === 'review' && (
                             <ReviewActions
                               taskId={t.id}
@@ -679,20 +698,24 @@ function TaskCard({
           </button>
         )}
         {task.projectName && (
-          <Badge className="border-ink-200 bg-white text-ink-500">
-            <FolderKanban size={9} /> {task.projectName}
-          </Badge>
+          <span data-private>
+            <Badge className="border-ink-200 bg-white text-ink-500">
+              <FolderKanban size={9} /> {task.projectName}
+            </Badge>
+          </span>
         )}
         {task.clientName && (
-          <Badge className="border-ink-200 bg-white text-ink-500">
-            <User size={9} /> {task.clientName}
-          </Badge>
+          <span data-private>
+            <Badge className="border-ink-200 bg-white text-ink-500">
+              <User size={9} /> {task.clientName}
+            </Badge>
+          </span>
         )}
       </div>
 
       {/* 待验收卡片的验收标准常驻显示（验收时就在看这一列），其余状态点开步骤时一起看 */}
       {!overlay && task.acceptCriteria && (task.status === 'review' || stepsOpen) && (
-        <AcceptCriteria text={task.acceptCriteria} />
+        <AcceptCriteria text={task.acceptCriteria} taskId={task.id} />
       )}
       {/* 待验收卡片的就地验收动作：通过 / 打回（打回原因就地填写，可粘贴截图，追加到备注） */}
       {!overlay && task.status === 'review' && onAccept && onReject && (
@@ -860,23 +883,60 @@ function ReviewActions({
   )
 }
 
-// 验收标准块：一行一条编号列出。待验收时人工对着这里逐条实测。
-function AcceptCriteria({ text }: { text: string }) {
+// 验收标准块：一行一条，每条一个勾选框。待验收时人工对着这里逐条实测打勾。
+function AcceptCriteria({ text, taskId }: { text: string; taskId: number }) {
   const lines = text
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean)
+  const storageKey = `wb_accept_${taskId}`
+  // 按标准原文存勾选状态：标准被改写后旧勾选自然失效，不会错记到新条目上
+  const [checked, setChecked] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey)
+      return new Set<string>(raw ? JSON.parse(raw) : [])
+    } catch {
+      return new Set()
+    }
+  })
+
+  const toggle = (line: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev)
+      if (next.has(line)) next.delete(line)
+      else next.add(line)
+      localStorage.setItem(storageKey, JSON.stringify([...next]))
+      return next
+    })
+
   if (!lines.length) return null
   return (
     <div className="mt-1.5 rounded-md border border-sky-200 bg-sky-50/60 px-2 py-1.5">
-      <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold text-sky-700">
-        <ClipboardCheck size={10} /> 验收标准 · 逐条实测通过后标记完成
+      <p className="mb-1 flex items-center gap-1 text-[11px] font-semibold text-sky-700">
+        <ClipboardCheck size={11} /> 验收标准
+        <span className="tabular text-[10px] font-normal text-sky-500">
+          {lines.filter((l) => checked.has(l)).length}/{lines.length}
+        </span>
+        <span className="ml-auto text-[10px] font-normal text-sky-500">逐条实测通过后打勾</span>
       </p>
-      <ul className="space-y-0.5">
+      <ul className="space-y-1">
         {lines.map((l, i) => (
-          <li key={i} className="flex gap-1 text-[10px] leading-relaxed text-sky-900">
-            <span className="shrink-0 text-sky-400">{i + 1}.</span>
-            <span className="min-w-0 break-words">{l}</span>
+          <li key={i}>
+            <label
+              className="flex cursor-pointer items-start gap-1.5 text-xs leading-relaxed text-sky-900"
+              onPointerDown={(e) => e.stopPropagation()}
+              onDoubleClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={checked.has(l)}
+                onChange={() => toggle(l)}
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-sky-600"
+              />
+              <span className={cn('min-w-0 break-words', checked.has(l) && 'text-sky-900/50 line-through')}>
+                {l}
+              </span>
+            </label>
           </li>
         ))}
       </ul>

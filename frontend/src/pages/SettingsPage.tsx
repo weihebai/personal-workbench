@@ -18,6 +18,7 @@ import {
   Trash2,
   Wallet,
   Cloud,
+  Mail,
 } from 'lucide-react'
 import { api, errMsg } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -34,6 +35,17 @@ type R2Setting = {
   bucket: string
   accessKeyIdMasked: string
   jurisdiction: string
+}
+type SmtpSetting = {
+  configured: boolean
+  enabled: boolean
+  host: string
+  port: number
+  username: string
+  from: string
+  to: string
+  ssl: boolean
+  passwordSaved: boolean
 }
 
 // 生成 48 位十六进制令牌（192 位熵）
@@ -133,6 +145,64 @@ export default function SettingsPage() {
     onError: (e) => setR2Msg({ type: 'err', text: errMsg(e, '操作失败') }),
   })
 
+  // 邮件通知（到期提醒）
+  const [smtpForm, setSmtpForm] = useState({
+    host: '',
+    port: '587',
+    username: '',
+    password: '',
+    from: '',
+    to: '',
+    ssl: false,
+    enabled: true,
+  })
+  const [smtpMsg, setSmtpMsg] = useState<Msg | null>(null)
+  const [showSmtpPass, setShowSmtpPass] = useState(false)
+  const { data: smtp } = useQuery({
+    queryKey: ['smtp-setting'],
+    queryFn: async () => (await api.get<SmtpSetting>('/settings/smtp')).data,
+  })
+  useEffect(() => {
+    if (!smtp) return
+    setSmtpForm({
+      host: smtp.host,
+      port: String(smtp.port || 587),
+      username: smtp.username,
+      password: '',
+      from: smtp.from,
+      to: smtp.to,
+      ssl: smtp.ssl,
+      enabled: smtp.enabled,
+    })
+  }, [smtp])
+
+  const smtpPayload = () => ({ ...smtpForm, port: Number(smtpForm.port) || 0 })
+
+  const testSmtp = useMutation({
+    mutationFn: async () => (await api.post('/settings/smtp/test', smtpPayload())).data,
+    onSuccess: () => setSmtpMsg({ type: 'ok', text: '测试邮件已发送，请查收' }),
+    onError: (e) => setSmtpMsg({ type: 'err', text: errMsg(e, '发送失败') }),
+  })
+
+  const saveSmtp = useMutation({
+    mutationFn: async () => (await api.put('/settings/smtp', smtpPayload())).data,
+    onSuccess: () => {
+      setSmtpMsg({ type: 'ok', text: '邮件通知配置已保存' })
+      setSmtpForm((f) => ({ ...f, password: '' }))
+      qc.invalidateQueries({ queryKey: ['smtp-setting'] })
+    },
+    onError: (e) => setSmtpMsg({ type: 'err', text: errMsg(e, '保存失败') }),
+  })
+
+  const clearSmtp = useMutation({
+    mutationFn: async () => (await api.delete('/settings/smtp')).data,
+    onSuccess: () => {
+      setSmtpMsg({ type: 'ok', text: '已关闭并清空邮件通知配置' })
+      qc.invalidateQueries({ queryKey: ['smtp-setting'] })
+    },
+    onError: (e) => setSmtpMsg({ type: 'err', text: errMsg(e, '操作失败') }),
+  })
+
   const mcpOn = !!mcp?.token
   const mcpUrl = `${window.location.origin}/mcp`
   const copy = async (kind: 'token' | 'text', text: string) => {
@@ -152,7 +222,7 @@ export default function SettingsPage() {
 服务地址：${mcpUrl}
 鉴权请求头：Authorization: Bearer ${mcp.token}
 
-可用工具：list_projects、get_project、create_project、update_project、list_tasks、create_task、update_task、get_task_attachments（读取任务上的截图，AI 可直接看图）。没有删除工具，删除请在网页里手动操作。
+可用工具：list_projects、get_project、create_project、update_project、list_tasks、create_task、update_task、get_task_attachments（读取任务上的截图，AI 可直接看图）、list_reminders、create_reminder（到期提醒）。没有删除工具，删除请在网页里手动操作。
 
 mcpServers JSON 配置（适用于 Cursor / ZCode 等客户端）：
 {
@@ -438,6 +508,161 @@ mcpServers JSON 配置（适用于 Cursor / ZCode 等客户端）：
                   }}
                 >
                   <Trash2 size={13} className="text-red-400" /> 切换回本地
+                </Button>
+              )}
+            </div>
+          </Card>
+
+          <Card>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-ink-900">
+                <Mail size={14} className="text-brand-500" /> 邮件通知
+              </h3>
+              <span
+                className={
+                  smtp?.configured && smtp.enabled
+                    ? 'rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700'
+                    : 'rounded-md border border-ink-200 bg-ink-50 px-1.5 py-0.5 text-[10px] font-medium text-ink-400'
+                }
+              >
+                {smtp?.configured && smtp.enabled ? '已开启' : smtp?.configured ? '已配置 · 未开启' : '未配置'}
+              </span>
+            </div>
+            <p className="mb-3 text-xs leading-relaxed text-ink-400">
+              到期提醒进入提前提醒天数或已过期后，每天发送一封汇总邮件。发件人与收件人可以是同一个邮箱。
+            </p>
+            <div className="space-y-2.5">
+              <Field label="SMTP 服务器">
+                <Input
+                  value={smtpForm.host}
+                  onChange={(e) => setSmtpForm((f) => ({ ...f, host: e.target.value }))}
+                  placeholder="smtp.example.com"
+                  autoComplete="off"
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="端口" hint="465 通常用 SSL">
+                  <Input
+                    value={smtpForm.port}
+                    onChange={(e) => setSmtpForm((f) => ({ ...f, port: e.target.value.replace(/\D/g, '') }))}
+                    inputMode="numeric"
+                    autoComplete="off"
+                  />
+                </Field>
+                <Field label="加密">
+                  <Select
+                    value={smtpForm.ssl ? 'ssl' : 'starttls'}
+                    onChange={(v) => setSmtpForm((f) => ({ ...f, ssl: v === 'ssl' }))}
+                    options={[
+                      { value: 'starttls', label: 'STARTTLS' },
+                      { value: 'ssl', label: 'SSL（465）' },
+                    ]}
+                  />
+                </Field>
+              </div>
+              <Field label="用户名" hint="不需要登录的服务器可留空">
+                <Input
+                  value={smtpForm.username}
+                  onChange={(e) => setSmtpForm((f) => ({ ...f, username: e.target.value }))}
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="密码 / 授权码" hint={smtp?.passwordSaved ? '留空保持不变' : undefined}>
+                <div className="relative">
+                  <Input
+                    type={showSmtpPass ? 'text' : 'password'}
+                    value={smtpForm.password}
+                    onChange={(e) => setSmtpForm((f) => ({ ...f, password: e.target.value }))}
+                    autoComplete="new-password"
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                    aria-label={showSmtpPass ? '隐藏密码' : '显示密码'}
+                    onClick={() => setShowSmtpPass((v) => !v)}
+                  >
+                    {showSmtpPass ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </Field>
+              <Field label="发件人">
+                <Input
+                  value={smtpForm.from}
+                  onChange={(e) => setSmtpForm((f) => ({ ...f, from: e.target.value }))}
+                  placeholder="workbench@example.com"
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="收件人" hint="多个用逗号分隔">
+                <Input
+                  value={smtpForm.to}
+                  onChange={(e) => setSmtpForm((f) => ({ ...f, to: e.target.value }))}
+                  placeholder="me@example.com"
+                  autoComplete="off"
+                />
+              </Field>
+              <label className="flex items-center gap-2 text-xs text-ink-600">
+                <input
+                  type="checkbox"
+                  checked={smtpForm.enabled}
+                  onChange={(e) => setSmtpForm((f) => ({ ...f, enabled: e.target.checked }))}
+                  className="h-3.5 w-3.5 accent-brand-500"
+                />
+                启用提醒邮件
+              </label>
+            </div>
+            {smtpMsg && (
+              <div
+                className={
+                  smtpMsg.type === 'ok'
+                    ? 'mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700'
+                    : 'mt-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-600'
+                }
+              >
+                {smtpMsg.text}
+              </div>
+            )}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                loading={saveSmtp.isPending}
+                onClick={() => {
+                  setSmtpMsg(null)
+                  if (!smtpForm.host.trim() || !smtpForm.from.trim() || !smtpForm.to.trim()) {
+                    setSmtpMsg({ type: 'err', text: '请填写服务器、发件人和收件人' })
+                    return
+                  }
+                  saveSmtp.mutate()
+                }}
+              >
+                保存配置
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                loading={testSmtp.isPending}
+                onClick={() => {
+                  setSmtpMsg(null)
+                  if (!smtpForm.host.trim() || !smtpForm.from.trim() || !smtpForm.to.trim()) {
+                    setSmtpMsg({ type: 'err', text: '请填写服务器、发件人和收件人' })
+                    return
+                  }
+                  testSmtp.mutate()
+                }}
+              >
+                发送测试邮件
+              </Button>
+              {smtp?.configured && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={clearSmtp.isPending}
+                  onClick={() => {
+                    if (confirm('关闭邮件通知并清空 SMTP 配置？')) clearSmtp.mutate()
+                  }}
+                >
+                  <Trash2 size={13} className="text-red-400" /> 清除配置
                 </Button>
               )}
             </div>

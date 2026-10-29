@@ -15,12 +15,12 @@
 | **里程碑** | 项目内交付节点（备案、验收、等反馈…），按工作日/自然日推算，临期自动跟进 |
 | **收款** | 分期收款节点、待收/已收/逾期状态、一键标记到账 |
 | **任务** | 看板拖拽（待办/进行中/已完成）+ 列表视图，支持优先级、截止日、工时、预算 |
-| **到期提醒** | **证书/域名/服务器/客户续费** 通用到期提醒，按剩余天数分级预警 |
+| **到期提醒** | **证书/域名/服务器/客户续费** 通用到期提醒，按剩余天数分级预警，可配置 SMTP 邮件通知 |
 | **灵感记录** | **收件箱式**收集公众号/开源项目/文章，粘链接即存，之后逐条消化 |
 | **内容库** | **Markdown 编写/预览**，固定类型 + 标签，可传图，可从灵感一键整理，生成**可撤销的公开只读链接** |
 | **客户** | 联系人、电话、微信、来源渠道（闲鱼/小红书/熟人…） |
 | **全局搜索** | `按 /` 唤起，跨项目、任务、灵感、内容、提醒、客户检索 |
-| **设置** | 账号信息、修改密码、部署与安全说明 |
+| **设置** | 账号信息、修改密码、MCP 令牌、图片存储、邮件通知、备份迁移 |
 
 **移动端**：底部 Tab 导航 + 响应式卡片，手机浏览器直接可用，无需 App。
 
@@ -177,7 +177,7 @@ cd frontend && pnpm test     # Vitest + Testing Library（jsdom）
 ## MCP：让 AI 管理项目和任务
 
 工作台内置 MCP（Model Context Protocol）端点，AI 客户端（Claude、ZCode、Cursor 等）
-连上之后就能直接查询/创建/编辑项目和任务。工具经 `internal/mcpbridge` 走 HTTP API 操作数据，
+连上之后就能直接查询/创建/编辑项目、任务和到期提醒。工具经 `internal/mcpbridge` 走 HTTP API 操作数据，
 数据库零侵入。
 
 | 工具 | 说明 |
@@ -190,6 +190,8 @@ cd frontend && pnpm test     # Vitest + Testing Library（jsdom）
 | `create_task` | 创建任务（可关联项目） |
 | `update_task` | 编辑任务（改状态、优先级、截止日等）。AI 完成后只允许流转到「待验收」，`done` 由人工设置 |
 | `get_task_attachments` | 读取任务上的截图，以图片返回给 AI（处理打回、看现场截图时用） |
+| `list_reminders` | 列到期提醒（证书/域名/服务器/客户续费），含到期日、剩余天数、是否已过期 |
+| `create_reminder` | 新建到期提醒，进入提前提醒天数或过期后由工作台发邮件通知 |
 
 没有删除类工具——AI 误操作的代价不可控，删除请在页面里手动做。
 
@@ -493,6 +495,11 @@ POST   /api/reminders
 PUT    /api/reminders/:id
 DELETE /api/reminders/:id
 
+GET    /api/settings/smtp         邮件通知配置（密码不回传）
+PUT    /api/settings/smtp         保存配置（保存前校验 SMTP 连接）
+POST   /api/settings/smtp/test    发送测试邮件
+DELETE /api/settings/smtp         关闭并清空配置
+
 GET    /api/milestones            里程碑（支持 projectId/status/open=1）
 POST   /api/milestones
 PUT    /api/milestones/:id
@@ -546,6 +553,10 @@ GET    /api/public/contents/:token  公开只读读取（不鉴权，Token 不�
 `GET /api/attachments/:hash/raw` 不鉴权是因为 `<img>` 标签由浏览器自己发起请求，带不上自定义请求头。它靠 256 位内容哈希保证不可枚举——和对象存储预签名 URL 同一思路。若要更严，可改成带时效的签名 URL，或把站点放进 Cloudflare Access 后面（注意给分享路径配 Bypass）。
 
 图片存储可在设置页切换到 Cloudflare R2，无需额外环境变量；切换后新上传图片写入 R2，历史图片按各自记录继续从原存储读取。
+
+到期提醒的邮件通知同样在设置页配置 SMTP（支持 SSL / STARTTLS，密码加密存储）。服务启动后每小时检查一次，提醒进入提前提醒天数或已过期时发送汇总邮件，同一条提醒每天最多一封，发过的记录存在 `reminders.notified_on`。
+
+用 Resend 的话可以直接填 SMTP：服务器 `smtp.resend.com`，端口 `465`（SSL）或 `587`（STARTTLS），用户名固定 `resend`，密码填 Resend 的 API Key，发件人用已验证域名下的地址（如 `noreply@你的域名`）。
 
 ---
 

@@ -256,6 +256,7 @@ export default function ProjectsPage() {
                       to={`/projects/${p.id}`}
                       onContextMenu={(e) => e.stopPropagation()}
                       className="block truncate text-[13px] font-semibold text-ink-900 hover:text-brand-600"
+                      data-private
                     >
                       {p.name}
                     </Link>

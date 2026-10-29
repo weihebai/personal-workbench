@@ -315,7 +315,7 @@ export default function DashboardPage() {
                   </span>
                 )}
                 {!p.overdue && p.projectName && (
-                  <span className="hidden shrink-0 truncate text-[10px] text-ink-400 sm:inline">
+                  <span className="hidden shrink-0 truncate text-[10px] text-ink-400 sm:inline" data-private>
                     {p.projectName}
                   </span>
                 )}
@@ -349,7 +349,7 @@ export default function DashboardPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-xs text-ink-800">{f.title}</p>
                     <p className="truncate text-[10px] text-ink-400">
-                      {f.projectName}
+                      <span data-private>{f.projectName}</span>
                       {f.expect && ` · ${f.expect}`}
                     </p>
                   </div>

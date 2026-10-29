@@ -83,6 +83,12 @@ body {
   font-feature-settings: "tnum";
 }
 
+/* 隐私打码：Ctrl+Shift+M 切换。金额、日期、项目/客户名模糊掉，截图或他人在场时用 */
+.privacy-mode .tabular,
+.privacy-mode [data-private] {
+  filter: blur(4px);
+}
+
 /* 卡片 */
 .card {
   background: var(--surface);

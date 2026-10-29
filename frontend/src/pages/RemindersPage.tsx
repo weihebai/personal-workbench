@@ -150,7 +150,9 @@ export default function RemindersPage() {
                   </div>
                 </div>
                 {r.projectName && (
-                  <p className="truncate text-[10px] text-ink-400">关联项目：{r.projectName}</p>
+                  <p className="truncate text-[10px] text-ink-400">
+                    关联项目：<span data-private>{r.projectName}</span>
+                  </p>
                 )}
               </Card>
             )

@@ -206,6 +206,11 @@ func main() {
 			authed.PUT("/settings/r2", h.UpdateR2Setting)
 			authed.POST("/settings/r2/test", h.TestR2Setting)
 			authed.DELETE("/settings/r2", h.DeleteR2Setting)
+			// 邮件通知（到期提醒）：配置 SMTP、发送测试邮件、清空配置
+			authed.GET("/settings/smtp", h.GetSmtpSetting)
+			authed.PUT("/settings/smtp", h.UpdateSmtpSetting)
+			authed.POST("/settings/smtp/test", h.TestSmtpSetting)
+			authed.DELETE("/settings/smtp", h.ClearSmtpSetting)
 
 			// 内容库（Markdown 笔记 / 文章 / 客户素材，可生成公开分享链接）
 			authed.GET("/contents", h.ListContents)
@@ -278,6 +283,10 @@ func main() {
 
 	srv := &http.Server{Addr: cfg.Addr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
 
+	// 到期提醒邮件：启动时先查一次，之后每小时一次
+	notifyCtx, stopNotify := context.WithCancel(context.Background())
+	go h.RunReminderNotifier(notifyCtx)
+
 	go func() {
 		log.Printf("服务启动: http://localhost%s", cfg.Addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -289,6 +298,7 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 	log.Println("正在关闭服务...")
+	stopNotify()
 
 	// 先停止接收新请求，让进行中的请求完成
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

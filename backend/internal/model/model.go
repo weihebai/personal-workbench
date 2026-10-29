@@ -129,7 +129,7 @@ type Task struct {
 
 	Status   string `gorm:"size:16;index" json:"status"`   // todo 待办 / doing 进行中 / review 待验收 / done 已完成 / canceled 已取消
 	Priority string `gorm:"size:16;index" json:"priority"` // low 低 / normal 普通 / high 高 / urgent 紧急
-	Kind     string `gorm:"size:16;index" json:"kind"`     // personal 个人 / freelance 私活
+	Kind     string `gorm:"size:16;index" json:"kind"`     // company 公司 / personal 个人 / freelance 私活
 
 	DueDate        *time.Time `json:"dueDate"`
 	RemindDays     int        `json:"remindDays"` // 提前提醒天数
@@ -173,6 +173,9 @@ type Reminder struct {
 
 	Enabled bool   `gorm:"default:true" json:"enabled"`
 	Note    string `gorm:"type:text" json:"note"`
+
+	// 邮件提醒发送日期（YYYY-MM-DD），同一天内不重复发送；不对外输出
+	NotifiedOn string `gorm:"size:10" json:"-"`
 }
 
 // 里程碑：项目内部进度节点（备案审核、交付验收等）

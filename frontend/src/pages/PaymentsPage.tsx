@@ -129,7 +129,7 @@ export default function PaymentsPage() {
                 return (
                   <tr key={p.id} className="border-b border-[var(--border)] last:border-0 hover:bg-ink-50/60">
                     <td className="px-3 py-2 font-medium text-ink-900">{p.title || '未命名款项'}</td>
-                    <td className="hidden max-w-32 truncate px-2 py-2 text-ink-500 sm:table-cell">
+                    <td className="hidden max-w-32 truncate px-2 py-2 text-ink-500 sm:table-cell" data-private>
                       {projName(p.projectId)}
                     </td>
                     <td className="tabular px-2 py-2 text-right font-bold text-ink-900">{money(p.amount)}</td>

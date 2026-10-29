@@ -71,6 +71,7 @@ export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: 
   const setV = (k: keyof typeof form) => (v: string) => setForm((f) => ({ ...f, [k]: v }))
 
   const kindOpts: Option[] = [
+    { value: 'company', label: '公司任务' },
     { value: 'freelance', label: '私活任务' },
     { value: 'personal', label: '个人项目' },
   ]

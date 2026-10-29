@@ -305,7 +305,7 @@ func RegisterTools(server *mcp.Server, wb *Client) {
 		ProjectID      *uint64  `json:"projectId,omitempty" jsonschema:"关联项目 ID"`
 		Status         string   `json:"status,omitempty" jsonschema:"todo 待办 / doing 进行中 / review 待验收 / done 已完成 / canceled 已取消，默认 todo"`
 		Priority       string   `json:"priority,omitempty" jsonschema:"low 低 / normal 普通 / high 高 / urgent 紧急，默认 normal"`
-		Kind           string   `json:"kind,omitempty" jsonschema:"personal 个人 / freelance 私活，默认 freelance"`
+		Kind           string   `json:"kind,omitempty" jsonschema:"company 公司 / personal 个人 / freelance 私活，默认 freelance"`
 		DueDate        string   `json:"dueDate,omitempty" jsonschema:"截止日期，如 2026-10-30"`
 		Budget         *float64 `json:"budget,omitempty" jsonschema:"预算"`
 		Note           string   `json:"note,omitempty" jsonschema:"备注"`
@@ -316,6 +316,49 @@ func RegisterTools(server *mcp.Server, wb *Client) {
 	}, func(ctx context.Context, req *mcp.CallToolRequest, in createTaskIn) (*mcp.CallToolResult, any, error) {
 		var created map[string]any
 		if err := wb.do(ctx, http.MethodPost, "/api/tasks", in, &created); err != nil {
+			return fail(err)
+		}
+		return ok(created)
+	})
+
+	type listRemindersIn struct {
+		Category  string  `json:"category,omitempty" jsonschema:"certificate 证书 / domain 域名 / server 服务器 / client 客户续费 / other 其他；留空=全部"`
+		ProjectID *uint64 `json:"projectId,omitempty" jsonschema:"只看某个项目下的提醒"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "list_reminders",
+		Description: "列出到期提醒（证书、域名、服务器、客户续费），含到期日、剩余天数、是否已过期。",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in listRemindersIn) (*mcp.CallToolResult, any, error) {
+		url := "/api/reminders?category=" + in.Category
+		if in.ProjectID != nil {
+			url += fmt.Sprintf("&projectId=%d", *in.ProjectID)
+		}
+		var out struct {
+			Items []reminderBrief `json:"items"`
+		}
+		if err := wb.do(ctx, http.MethodGet, url, nil, &out); err != nil {
+			return fail(err)
+		}
+		return ok(out)
+	})
+
+	type createReminderIn struct {
+		Title      string  `json:"title" jsonschema:"提醒名称（必填）"`
+		Category   string  `json:"category,omitempty" jsonschema:"certificate 证书 / domain 域名 / server 服务器 / client 客户续费 / other 其他，默认 other"`
+		ProjectID  *uint64 `json:"projectId,omitempty" jsonschema:"关联项目 ID"`
+		Target     string  `json:"target,omitempty" jsonschema:"域名 / 主机 / 说明"`
+		ExpireAt   string  `json:"expireAt" jsonschema:"到期日，如 2026-11-30（必填）"`
+		RemindDays int     `json:"remindDays,omitempty" jsonschema:"提前多少天开始提醒，默认 7"`
+		Issuer     string  `json:"issuer,omitempty" jsonschema:"签发机构 / 服务商"`
+		AutoRenew  bool    `json:"autoRenew,omitempty" jsonschema:"是否自动续费"`
+		Note       string  `json:"note,omitempty" jsonschema:"备注"`
+	}
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "create_reminder",
+		Description: "新建到期提醒。进入提前提醒天数或已过期后，工作台会按配置发送邮件通知。",
+	}, func(ctx context.Context, req *mcp.CallToolRequest, in createReminderIn) (*mcp.CallToolResult, any, error) {
+		var created map[string]any
+		if err := wb.do(ctx, http.MethodPost, "/api/reminders", in, &created); err != nil {
 			return fail(err)
 		}
 		return ok(created)
@@ -475,6 +518,24 @@ type taskBrief struct {
 	EstimateMinutes int     `json:"estimateMinutes,omitempty"`
 	ActualMinutes   int     `json:"actualMinutes,omitempty"`
 	Note            string  `json:"note,omitempty"`
+}
+
+// reminderBrief 提醒列表的裁剪视图（对应 /api/reminders 的返回）
+type reminderBrief struct {
+	ID          uint64  `json:"id"`
+	Title       string  `json:"title"`
+	Category    string  `json:"category"`
+	ProjectID   *uint64 `json:"projectId,omitempty"`
+	ProjectName string  `json:"projectName,omitempty"`
+	Target      string  `json:"target,omitempty"`
+	ExpireAt    string  `json:"expireAt"`
+	RemindDays  int     `json:"remindDays"`
+	Issuer      string  `json:"issuer,omitempty"`
+	AutoRenew   bool    `json:"autoRenew"`
+	Enabled     bool    `json:"enabled"`
+	Note        string  `json:"note,omitempty"`
+	State       string  `json:"state,omitempty"`
+	DaysLeft    int     `json:"daysLeft"`
 }
 
 // attMeta 附件列表的裁剪视图（对应 /api/attachments 的返回）
