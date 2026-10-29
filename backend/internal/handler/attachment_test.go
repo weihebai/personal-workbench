@@ -33,7 +33,7 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 			sqlDB.Close()
 		}
 	})
-	if err := db.AutoMigrate(&model.Task{}, &model.Subtask{}, &model.Attachment{}, &model.Project{}); err != nil {
+	if err := db.AutoMigrate(model.AllModels()...); err != nil {
 		t.Fatalf("迁移失败: %v", err)
 	}
 
@@ -41,7 +41,11 @@ func newTestHandler(t *testing.T) (*Handler, string) {
 	if err := os.MkdirAll(uploadDir, 0o755); err != nil {
 		t.Fatalf("建上传目录失败: %v", err)
 	}
-	return &Handler{DB: db, Cfg: &config.Config{UploadDir: uploadDir, MaxUploadBytes: 10 << 20}}, uploadDir
+	return &Handler{DB: db, Cfg: &config.Config{
+		DBPath:         filepath.Join(dir, "test.db"),
+		UploadDir:      uploadDir,
+		MaxUploadBytes: 10 << 20,
+	}}, uploadDir
 }
 
 // 写一个假的图片文件，返回它的哈希
@@ -102,7 +106,7 @@ func TestCleanupOrphanFile(t *testing.T) {
 
 	// 删掉 A 的记录：B 还在用，文件不能删
 	h.DB.Delete(&model.Attachment{}, a.ID)
-	if removed := h.cleanupOrphanFile(hash, "image/png"); removed {
+	if removed := h.cleanupOrphanFile(hash, "image/png", "local"); removed {
 		t.Fatal("还有记录引用时不该删文件")
 	}
 	if _, err := os.Stat(path); err != nil {
@@ -111,7 +115,7 @@ func TestCleanupOrphanFile(t *testing.T) {
 
 	// 删掉 B 的记录：没人引用了，文件该删
 	h.DB.Delete(&model.Attachment{}, b.ID)
-	if removed := h.cleanupOrphanFile(hash, "image/png"); !removed {
+	if removed := h.cleanupOrphanFile(hash, "image/png", "local"); !removed {
 		t.Fatal("没有记录引用时应该删掉文件")
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
@@ -145,7 +149,7 @@ func TestCleanupMissingFile(t *testing.T) {
 	hash, path := writeFakeImage(t, h, "will-vanish")
 	os.Remove(path)
 
-	if removed := h.cleanupOrphanFile(hash, "image/png"); removed {
+	if removed := h.cleanupOrphanFile(hash, "image/png", "local"); removed {
 		t.Fatal("文件本来就不在，不该返回「已删除」")
 	}
 }

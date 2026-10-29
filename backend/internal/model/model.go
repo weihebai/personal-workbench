@@ -229,6 +229,35 @@ type Idea struct {
 	ReadingMins int      `gorm:"-" json:"readingMins"` // 按正文字数估算阅读时间
 }
 
+// 内容库：Markdown 笔记、文章、客户素材，可生成公开只读分享链接。
+type Content struct {
+	Base
+	Title  string `gorm:"size:255;not null;index" json:"title"`
+	Kind   string `gorm:"size:16;index" json:"kind"`
+	Status string `gorm:"size:16;index" json:"status"`
+	Body   string `gorm:"type:text" json:"body,omitempty"`
+
+	Tags         string `gorm:"size:255" json:"tags"`
+	SourceIdeaID *uint  `gorm:"index" json:"sourceIdeaId"`
+	ProjectID    *uint  `gorm:"index" json:"projectId"`
+	ClientID     *uint  `gorm:"index" json:"clientId"`
+
+	ShareToken     *string    `gorm:"size:64;uniqueIndex" json:"shareToken,omitempty"`
+	ShareExpiresAt *time.Time `json:"shareExpiresAt"`
+
+	// 只读
+	TagList         []string `gorm:"-" json:"tagList"`
+	ProjectName     string   `gorm:"-" json:"projectName"`
+	ClientName      string   `gorm:"-" json:"clientName"`
+	SourceIdeaTitle string   `gorm:"-" json:"sourceIdeaTitle"`
+	ShareEnabled    bool     `gorm:"-" json:"shareEnabled"`
+	ShareExpired    bool     `gorm:"-" json:"shareExpired"`
+	SharePath       string   `gorm:"-" json:"sharePath"`
+	Excerpt         string   `gorm:"-" json:"excerpt"`
+	AttachmentCount int      `gorm:"-" json:"attachmentCount"`
+	CoverURL        string   `gorm:"-" json:"coverUrl"`
+}
+
 // 标签
 type Tag struct {
 	Base
@@ -266,6 +295,8 @@ type Attachment struct {
 	Base
 	// 非唯一：多条记录可指向同一个物理文件
 	Hash string `gorm:"size:64;index;not null" json:"hash"`
+	// local 本地磁盘 / r2 Cloudflare R2；空值按 local 处理，兼容旧记录
+	Storage string `gorm:"size:16;not null;default:local" json:"-"`
 	// 原始文件名，仅用于下载时显示
 	Name      string `gorm:"size:255" json:"name"`
 	Mime      string `gorm:"size:128" json:"mime"`
@@ -274,6 +305,7 @@ type Attachment struct {
 	Height    int    `json:"height"`
 	TaskID    *uint  `gorm:"index" json:"taskId"`
 	ProjectID *uint  `gorm:"index" json:"projectId"`
+	ContentID *uint  `gorm:"index" json:"contentId"`
 	// 只读：访问地址
 	URL string `gorm:"-" json:"url"`
 }
@@ -282,6 +314,6 @@ func AllModels() []any {
 	return []any{
 		&User{}, &LoginAttempt{}, &Client{}, &Project{}, &Payment{}, &Task{},
 		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{}, &Idea{},
-		&Subtask{}, &Attachment{},
+		&Content{}, &Subtask{}, &Attachment{},
 	}
 }

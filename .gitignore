@@ -6,6 +6,7 @@ data/
 *.db-wal
 .env
 .jwt_secret
+.r2_secret
 .DS_Store
 *.log
 bin/

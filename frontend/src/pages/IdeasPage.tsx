@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Plus,
@@ -10,12 +11,13 @@ import {
   GitBranch,
   MessageSquare,
   FileText,
+  FileOutput,
   Play,
   StickyNote,
   Clock,
   Inbox,
 } from 'lucide-react'
-import { api, type Idea, type IdeaStats } from '@/lib/api'
+import { api, errMsg, type Content, type Idea, type IdeaStats } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Badge, Card, EmptyState, PageHeader, Skeleton } from '@/components/ui/Layout'
 import { cn, fmtDate, dictOf, IDEA_STATUS, IDEA_SOURCE } from '@/lib/utils'
@@ -54,6 +56,7 @@ export default function IdeasPage() {
   const [starOnly, setStarOnly] = useState(false)
   const [editing, setEditing] = useState<Idea | null | undefined>(undefined)
   const qc = useQueryClient()
+  const navigate = useNavigate()
 
   const { data, isLoading } = useQuery({
     queryKey: ['ideas', status, source, q, starOnly],
@@ -90,6 +93,17 @@ export default function IdeasPage() {
     mutationFn: async ({ id, star }: { id: number; star: number }) =>
       api.patch(`/ideas/${id}/status`, { star }),
     onSuccess: invalidate,
+  })
+
+  const convert = useMutation({
+    mutationFn: async (id: number) =>
+      (await api.post<Content>('/contents/from-idea', { ideaId: id })).data,
+    onSuccess: (c) => {
+      qc.invalidateQueries({ queryKey: ['contents'] })
+      qc.invalidateQueries({ queryKey: ['contents-stats'] })
+      navigate(`/contents/${c.id}`)
+    },
+    onError: (e) => alert(errMsg(e)),
   })
 
   const items = data?.items ?? []
@@ -223,6 +237,7 @@ export default function IdeasPage() {
                 onDelete={() => confirm(`删除「${it.title}」？`) && del.mutate(it.id)}
                 onStatus={(next) => setStatusMut.mutate({ id: it.id, next })}
                 onStar={(star) => toggleStar.mutate({ id: it.id, star })}
+                onConvert={() => convert.mutate(it.id)}
               />
             ))}
           </div>
@@ -240,12 +255,14 @@ function IdeaCard({
   onDelete,
   onStatus,
   onStar,
+  onConvert,
 }: {
   idea: Idea
   onEdit: () => void
   onDelete: () => void
   onStatus: (next: string) => void
   onStar: (star: number) => void
+  onConvert: () => void
 }) {
   const sd = dictOf(IDEA_STATUS, idea.status)
   const src = dictOf(IDEA_SOURCE, idea.source)
@@ -337,6 +354,13 @@ function IdeaCard({
         </div>
 
         <div className="flex items-center gap-1">
+          <button
+            onClick={onConvert}
+            title="整理成内容"
+            className="flex items-center gap-1 rounded border border-brand-200 bg-brand-50 px-1.5 py-0.5 text-[10px] font-medium text-brand-600 hover:bg-brand-100"
+          >
+            <FileOutput size={10} /> 整理成内容
+          </button>
           {idea.url && (
             <a
               href={idea.url}

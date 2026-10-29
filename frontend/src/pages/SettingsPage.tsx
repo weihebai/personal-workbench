@@ -17,15 +17,24 @@ import {
   EyeOff,
   Trash2,
   Wallet,
+  Cloud,
 } from 'lucide-react'
 import { api, errMsg } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Field, Input } from '@/components/ui/Input'
+import { Select } from '@/components/ui/Select'
 import { Card, Dialog, PageHeader } from '@/components/ui/Layout'
 
 type Msg = { type: 'ok' | 'err'; text: string }
 
 type McpSetting = { token: string; source: 'db' | 'env' | 'off' }
+type R2Setting = {
+  configured: boolean
+  accountId: string
+  bucket: string
+  accessKeyIdMasked: string
+  jurisdiction: string
+}
 
 // 生成 48 位十六进制令牌（192 位熵）
 function genToken() {
@@ -70,6 +79,58 @@ export default function SettingsPage() {
       qc.invalidateQueries({ queryKey: ['mcp-setting'] })
       setCopied(null)
     },
+  })
+
+  // 图片存储
+  const [r2Form, setR2Form] = useState({
+    accountId: '',
+    bucket: '',
+    accessKeyId: '',
+    secretAccessKey: '',
+    jurisdiction: '',
+  })
+  const [r2Msg, setR2Msg] = useState<Msg | null>(null)
+  const [showR2Secret, setShowR2Secret] = useState(false)
+  const { data: r2 } = useQuery({
+    queryKey: ['r2-setting'],
+    queryFn: async () => (await api.get<R2Setting>('/settings/r2')).data,
+  })
+  useEffect(() => {
+    if (!r2) return
+    setR2Form({
+      accountId: r2.accountId,
+      bucket: r2.bucket,
+      accessKeyId: '',
+      secretAccessKey: '',
+      jurisdiction: r2.jurisdiction,
+    })
+  }, [r2])
+
+  const r2Payload = () => ({ ...r2Form })
+
+  const testR2 = useMutation({
+    mutationFn: async () => (await api.post('/settings/r2/test', r2Payload())).data,
+    onSuccess: () => setR2Msg({ type: 'ok', text: '连接成功' }),
+    onError: (e) => setR2Msg({ type: 'err', text: errMsg(e, '连接失败') }),
+  })
+
+  const saveR2 = useMutation({
+    mutationFn: async () => (await api.put('/settings/r2', r2Payload())).data,
+    onSuccess: () => {
+      setR2Msg({ type: 'ok', text: '已保存，新上传图片会写入 R2' })
+      setR2Form((f) => ({ ...f, accessKeyId: '', secretAccessKey: '' }))
+      qc.invalidateQueries({ queryKey: ['r2-setting'] })
+    },
+    onError: (e) => setR2Msg({ type: 'err', text: errMsg(e, '保存失败') }),
+  })
+
+  const clearR2 = useMutation({
+    mutationFn: async () => (await api.delete('/settings/r2')).data,
+    onSuccess: () => {
+      setR2Msg({ type: 'ok', text: '已切换回本地存储' })
+      qc.invalidateQueries({ queryKey: ['r2-setting'] })
+    },
+    onError: (e) => setR2Msg({ type: 'err', text: errMsg(e, '操作失败') }),
   })
 
   const mcpOn = !!mcp?.token
@@ -252,6 +313,136 @@ mcpServers JSON 配置（适用于 Cursor / ZCode 等客户端）：
         </Card>
 
         <div className="space-y-3">
+          <Card>
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-ink-900">
+                <Cloud size={14} className="text-sky-500" /> 图片存储
+              </h3>
+              <span
+                className={
+                  r2?.configured
+                    ? 'rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700'
+                    : 'rounded-md border border-ink-200 bg-ink-50 px-1.5 py-0.5 text-[10px] font-medium text-ink-400'
+                }
+              >
+                {r2?.configured ? 'Cloudflare R2' : '本地磁盘'}
+              </span>
+            </div>
+            <p className="mb-3 text-xs leading-relaxed text-ink-400">
+              配置后新上传图片写入 R2，原有图片仍可读取。Bucket 保持私有，图片继续通过工作台接口访问。
+            </p>
+            <div className="space-y-2.5">
+              <Field label="Account ID">
+                <Input
+                  value={r2Form.accountId}
+                  onChange={(e) => setR2Form((f) => ({ ...f, accountId: e.target.value }))}
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="Bucket">
+                <Input
+                  value={r2Form.bucket}
+                  onChange={(e) => setR2Form((f) => ({ ...f, bucket: e.target.value }))}
+                  autoComplete="off"
+                />
+              </Field>
+              <Field label="区域" hint="Bucket 创建时选择了 EU jurisdiction 才需要改">
+                <Select
+                  value={r2Form.jurisdiction}
+                  onChange={(v) => setR2Form((f) => ({ ...f, jurisdiction: v }))}
+                  options={[
+                    { value: '', label: '默认区域' },
+                    { value: 'eu', label: 'EU' },
+                  ]}
+                />
+              </Field>
+              <Field
+                label="Access Key ID"
+                hint={r2?.configured ? `当前：${r2.accessKeyIdMasked}；留空保持不变` : undefined}
+              >
+                <Input
+                  value={r2Form.accessKeyId}
+                  onChange={(e) => setR2Form((f) => ({ ...f, accessKeyId: e.target.value }))}
+                  autoComplete="off"
+                />
+              </Field>
+              <Field
+                label="Secret Access Key"
+                hint={r2?.configured ? '留空保持不变' : undefined}
+              >
+                <div className="relative">
+                  <Input
+                    type={showR2Secret ? 'text' : 'password'}
+                    value={r2Form.secretAccessKey}
+                    onChange={(e) => setR2Form((f) => ({ ...f, secretAccessKey: e.target.value }))}
+                    autoComplete="new-password"
+                    className="pr-9"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                    aria-label={showR2Secret ? '隐藏密钥' : '显示密钥'}
+                    onClick={() => setShowR2Secret((v) => !v)}
+                  >
+                    {showR2Secret ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+              </Field>
+            </div>
+            {r2Msg && (
+              <div
+                className={
+                  r2Msg.type === 'ok'
+                    ? 'mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-700'
+                    : 'mt-2 rounded-md border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-600'
+                }
+              >
+                {r2Msg.text}
+              </div>
+            )}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                loading={saveR2.isPending}
+                onClick={() => {
+                  setR2Msg(null)
+                  if (!r2Form.accountId.trim() || !r2Form.bucket.trim()) {
+                    setR2Msg({ type: 'err', text: '请填写 Account ID 和 Bucket' })
+                    return
+                  }
+                  saveR2.mutate()
+                }}
+              >
+                保存并启用
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                loading={testR2.isPending}
+                onClick={() => {
+                  setR2Msg(null)
+                  testR2.mutate()
+                }}
+              >
+                测试连接
+              </Button>
+              {r2?.configured && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  loading={clearR2.isPending}
+                  onClick={() => {
+                    if (confirm('切换回本地存储后，新图片会写入服务器磁盘；R2 中的已有图片不会删除。确定继续？')) {
+                      clearR2.mutate()
+                    }
+                  }}
+                >
+                  <Trash2 size={13} className="text-red-400" /> 切换回本地
+                </Button>
+              )}
+            </div>
+          </Card>
+
           <Card>
             <h3 className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold text-ink-900">
               <Wallet size={14} className="text-emerald-500" /> 收款

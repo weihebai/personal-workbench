@@ -74,7 +74,14 @@ func (h *Handler) DeleteClient(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.DB.Delete(&model.Client{}, id).Error; err != nil {
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&model.Client{}, id).Error; err != nil {
+			return err
+		}
+		// 客户删了，内容本身保留，只断开关联
+		return tx.Model(&model.Content{}).Where("client_id = ?", id).Update("client_id", nil).Error
+	})
+	if err != nil {
 		serverErr(c, err)
 		return
 	}
@@ -84,27 +91,27 @@ func (h *Handler) DeleteClient(c *gin.Context) {
 // ---------- 项目 ----------
 
 type projectInput struct {
-	Name            string  `json:"name"`
-	Kind            string  `json:"kind"`
-	Status          string  `json:"status"`
-	Summary         string  `json:"summary"`
-	SourcePath      string  `json:"sourcePath"`
-	OnlineURL       string  `json:"onlineUrl"`
-	AdminURL        string  `json:"adminUrl"`
-	GitRepo         string  `json:"gitRepo"`
-	DeployAt        string  `json:"deployAt"`
-	TechStack       string  `json:"techStack"`
-	ClientID        *uint   `json:"clientId"`
-	Quote           float64 `json:"quote"`
-	Cost            float64 `json:"cost"`
-	CommissionType  string  `json:"commissionType"`
-	CommissionRate  float64 `json:"commissionRate"`
-	Broker          string  `json:"broker"`
-	StartDate       string  `json:"startDate"`
-	DueDate         string  `json:"dueDate"`
-	EstimateMinutes int     `json:"estimateMinutes"`
-	ActualMinutes   int     `json:"actualMinutes"`
-	Note            string  `json:"note"`
+	Name            string   `json:"name"`
+	Kind            string   `json:"kind"`
+	Status          string   `json:"status"`
+	Summary         string   `json:"summary"`
+	SourcePath      string   `json:"sourcePath"`
+	OnlineURL       string   `json:"onlineUrl"`
+	AdminURL        string   `json:"adminUrl"`
+	GitRepo         string   `json:"gitRepo"`
+	DeployAt        string   `json:"deployAt"`
+	TechStack       string   `json:"techStack"`
+	ClientID        *uint    `json:"clientId"`
+	Quote           float64  `json:"quote"`
+	Cost            float64  `json:"cost"`
+	CommissionType  string   `json:"commissionType"`
+	CommissionRate  float64  `json:"commissionRate"`
+	Broker          string   `json:"broker"`
+	StartDate       string   `json:"startDate"`
+	DueDate         string   `json:"dueDate"`
+	EstimateMinutes int      `json:"estimateMinutes"`
+	ActualMinutes   int      `json:"actualMinutes"`
+	Note            string   `json:"note"`
 	Tags            []string `json:"tags"`
 }
 
@@ -467,6 +474,10 @@ func (h *Handler) DeleteProject(c *gin.Context) {
 			return err
 		}
 		if err := tx.Where("project_id = ?", id).Delete(&model.Milestone{}).Error; err != nil {
+			return err
+		}
+		// 内容库里关联的项目只是软链接，项目删了内容要保留
+		if err := tx.Model(&model.Content{}).Where("project_id = ?", id).Update("project_id", nil).Error; err != nil {
 			return err
 		}
 		return tx.Where("target = ? AND target_id = ?", "project", id).Delete(&model.Taggable{}).Error

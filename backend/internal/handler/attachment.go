@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"image"
@@ -12,21 +13,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"personal-workbench/internal/model"
+	"personal-workbench/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
 
-// 图片上传。
-//
-// 存哪里：默认 ./data/uploads/<前2位>/<sha256>.<ext>
-//   - 和数据库同在一个 data/ 目录，docker 里挂的都是同一个卷，
-//     备份 / 迁移 / 换机器时把一个 data 目录带走就行
-//   - 按内容哈希命名，重复上传天然去重；分两级子目录避免单目录几万个文件
-//
-// 为什么不用 base64 存数据库：体积涨 33%，列表查询会被二进制拖慢，
-// 而且 SQLite 的 blob 备份起来没有单独文件方便。
+// 图片上传。未配置 R2 时落本地 data/uploads，配置后新图直接写入 R2。
 
 // 只接受这几种图片，别的一律拒绝
 var allowedImageMime = map[string]string{
@@ -34,6 +29,23 @@ var allowedImageMime = map[string]string{
 	"image/png":  ".png",
 	"image/gif":  ".gif",
 	"image/webp": ".webp",
+}
+
+func (h *Handler) r2Client() (*storage.R2, error) {
+	if h.settingValue(r2ConfiguredKey) != "1" {
+		return nil, nil
+	}
+	secret, err := h.decryptSecret(h.settingValue(r2CredentialValueKey))
+	if err != nil {
+		return nil, err
+	}
+	return storage.NewR2(storage.R2Config{
+		AccountID:       h.settingValue(r2AccountKey),
+		Bucket:          h.settingValue(r2BucketKey),
+		AccessKeyID:     h.settingValue(r2CredentialIDKey),
+		SecretAccessKey: secret,
+		Jurisdiction:    h.settingValue(r2JurisdictionKey),
+	})
 }
 
 // POST /api/attachments   multipart/form-data: file, taskId?, projectId?
@@ -103,9 +115,19 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 	}
 
 	sum := hex.EncodeToString(hash.Sum(nil))
+	r2, r2Err := h.r2Client()
+	if r2Err != nil {
+		serverErr(c, r2Err)
+		return
+	}
+	storageKind := "local"
+	if r2 != nil {
+		storageKind = "r2"
+	}
 
-	// 归属关系
-	var taskID, projectID *uint
+	// 归属关系：任务 / 项目 / 内容三选一，多传直接拒绝，
+	// 否则一张图到底属于谁就说不清了。
+	var taskID, projectID, contentID *uint
 	if tid := c.PostForm("taskId"); tid != "" {
 		if id, e := parseUint(tid); e == nil {
 			taskID = &id
@@ -116,16 +138,45 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 			projectID = &id
 		}
 	}
+	if cid := c.PostForm("contentId"); cid != "" {
+		if id, e := parseUint(cid); e == nil {
+			contentID = &id
+		}
+	}
+	owners := 0
+	if taskID != nil {
+		owners++
+	}
+	if projectID != nil {
+		owners++
+	}
+	if contentID != nil {
+		owners++
+	}
+	if owners > 1 {
+		badRequest(c, "图片只能归属任务、项目或内容中的一处")
+		return
+	}
+	if contentID != nil {
+		var n int64
+		h.DB.Model(&model.Content{}).Where("id = ?", *contentID).Count(&n)
+		if n == 0 {
+			badRequest(c, "内容不存在")
+			return
+		}
+	}
 
-	// 同一张图挂到同一个任务上：直接返回已有记录，避免重复粘贴产生两条一样的
+	// 同一张图挂到同一个任务/项目/内容上：直接返回已有记录，避免重复粘贴产生两条一样的
 	var dup model.Attachment
-	dupQ := h.DB.Where("hash = ?", sum)
+	dupQ := h.DB.Where("hash = ? AND storage = ?", sum, storageKind)
 	if taskID != nil {
 		dupQ = dupQ.Where("task_id = ?", *taskID)
 	} else if projectID != nil {
 		dupQ = dupQ.Where("project_id = ? AND task_id IS NULL", *projectID)
+	} else if contentID != nil {
+		dupQ = dupQ.Where("content_id = ? AND task_id IS NULL AND project_id IS NULL", *contentID)
 	} else {
-		dupQ = dupQ.Where("task_id IS NULL AND project_id IS NULL")
+		dupQ = dupQ.Where("task_id IS NULL AND project_id IS NULL AND content_id IS NULL")
 	}
 	if err := dupQ.First(&dup).Error; err == nil {
 		dup.URL = "/api/attachments/" + dup.Hash + "/raw"
@@ -133,25 +184,40 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 		return
 	}
 
-	// 落盘：data/uploads/ab/abcdef....jpg
-	// 文件已存在就不重复写（内容寻址，同名即同内容）
-	dst := h.filePathFor(sum, ext)
-	if _, statErr := os.Stat(dst); statErr != nil {
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if r2 != nil {
+		f, openErr := os.Open(tmpPath)
+		if openErr != nil {
+			serverErr(c, openErr)
+			return
+		}
+		defer f.Close()
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+		defer cancel()
+		if err := r2.Put(ctx, h.objectKey(sum, ext), f, size, mime); err != nil {
 			serverErr(c, err)
 			return
 		}
-		if err := os.Rename(tmpPath, dst); err != nil {
-			// 跨盘时 Rename 会失败，退化成复制
-			if err := copyFile(tmpPath, dst); err != nil {
+	} else {
+		// 文件已存在就不重复写（内容寻址，同名即同内容）
+		dst := h.filePathFor(sum, ext)
+		if _, statErr := os.Stat(dst); statErr != nil {
+			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 				serverErr(c, err)
 				return
+			}
+			if err := os.Rename(tmpPath, dst); err != nil {
+				// 跨盘时 Rename 会失败，退化成复制
+				if err := copyFile(tmpPath, dst); err != nil {
+					serverErr(c, err)
+					return
+				}
 			}
 		}
 	}
 
 	att := model.Attachment{
 		Hash:      sum,
+		Storage:   storageKind,
 		Name:      truncate(fh.Filename, 255),
 		Mime:      mime,
 		Size:      size,
@@ -159,6 +225,7 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 		Height:    cfg.Height,
 		TaskID:    taskID,
 		ProjectID: projectID,
+		ContentID: contentID,
 	}
 	if err := h.DB.Create(&att).Error; err != nil {
 		serverErr(c, err)
@@ -173,6 +240,10 @@ func (h *Handler) filePathFor(hash, ext string) string {
 	return filepath.Join(h.Cfg.UploadDir, hash[:2], hash+ext)
 }
 
+func (h *Handler) objectKey(hash, ext string) string {
+	return "uploads/" + hash[:2] + "/" + hash + ext
+}
+
 // GET /api/attachments/raw/:hash   -> 返回图片字节
 func (h *Handler) ServeAttachment(c *gin.Context) {
 	hash := c.Param("hash")
@@ -181,13 +252,50 @@ func (h *Handler) ServeAttachment(c *gin.Context) {
 		return
 	}
 	var att model.Attachment
-	if err := h.DB.Where("hash = ?", hash).First(&att).Error; err != nil {
-		notFound(c, "文件不存在")
-		return
+	// 同一个 hash 可能同时存在本地旧记录和后来上传到 R2 的记录；
+	// 优先返回 R2，避免 R2 文件仍可用时误以为图片已丢失。
+	if err := h.DB.Where("hash = ? AND storage = ?", hash, "r2").First(&att).Error; err != nil {
+		if err := h.DB.Where("hash = ?", hash).First(&att).Error; err != nil {
+			notFound(c, "文件不存在")
+			return
+		}
+	}
+	if att.Storage == "" {
+		att.Storage = "local"
 	}
 	ext := allowedImageMime[att.Mime]
 	if ext == "" {
 		ext = ".bin"
+	}
+	// 内容按哈希命名，永不变化，可以放心长缓存
+	c.Header("Cache-Control", "public, max-age=31536000, immutable")
+	c.Header("Content-Type", att.Mime)
+	if att.Storage == "r2" {
+		r2, err := h.r2Client()
+		if err != nil {
+			serverErr(c, err)
+			return
+		}
+		if r2 == nil {
+			notFound(c, "R2 未配置")
+			return
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
+		defer cancel()
+		body, _, _, err := r2.Get(ctx, h.objectKey(hash, ext))
+		if err != nil {
+			if storage.IsNotFound(err) {
+				notFound(c, "文件已丢失")
+				return
+			}
+			serverErr(c, err)
+			return
+		}
+		defer body.Close()
+		if _, err := io.Copy(c.Writer, body); err != nil {
+			c.Abort()
+		}
+		return
 	}
 	f, err := os.Open(h.filePathFor(hash, ext))
 	if err != nil {
@@ -200,13 +308,10 @@ func (h *Handler) ServeAttachment(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
-	// 内容按哈希命名，永不变化，可以放心长缓存
-	c.Header("Cache-Control", "public, max-age=31536000, immutable")
-	c.Header("Content-Type", att.Mime)
 	http.ServeContent(c.Writer, c.Request, att.Name, st.ModTime(), f)
 }
 
-// GET /api/attachments?taskId=1&projectId=2
+// GET /api/attachments?taskId=1&projectId=2&contentId=3
 func (h *Handler) ListAttachments(c *gin.Context) {
 	q := h.DB.Model(&model.Attachment{})
 	if id := queryUint(c, "taskId"); id != nil {
@@ -214,6 +319,9 @@ func (h *Handler) ListAttachments(c *gin.Context) {
 	}
 	if id := queryUint(c, "projectId"); id != nil {
 		q = q.Where("project_id = ?", *id)
+	}
+	if id := queryUint(c, "contentId"); id != nil {
+		q = q.Where("content_id = ?", *id)
 	}
 	var items []model.Attachment
 	if err := q.Order("id DESC").Limit(200).Find(&items).Error; err != nil {
@@ -245,21 +353,33 @@ func (h *Handler) DeleteAttachment(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
-	removed := h.cleanupOrphanFile(att.Hash, att.Mime)
+	removed := h.cleanupOrphanFile(att.Hash, att.Mime, att.Storage)
 	c.JSON(http.StatusOK, gin.H{"ok": true, "fileRemoved": removed})
 }
 
 // 如果这个 hash 已经没有任何记录引用了，就把磁盘文件删掉。
 // 返回是否真的删了文件。
-func (h *Handler) cleanupOrphanFile(hash, mime string) bool {
+func (h *Handler) cleanupOrphanFile(hash, mime, storageKind string) bool {
 	var n int64
-	h.DB.Model(&model.Attachment{}).Where("hash = ?", hash).Count(&n)
+	h.DB.Model(&model.Attachment{}).Where("hash = ? AND storage = ?", hash, storageKind).Count(&n)
 	if n > 0 {
 		return false
 	}
 	ext := allowedImageMime[mime]
 	if ext == "" {
 		ext = ".bin"
+	}
+	if storageKind == "r2" {
+		r2, err := h.r2Client()
+		if err != nil || r2 == nil {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := r2.Delete(ctx, h.objectKey(hash, ext)); err != nil {
+			return false
+		}
+		return true
 	}
 	path := h.filePathFor(hash, ext)
 	if err := os.Remove(path); err != nil {
@@ -287,7 +407,7 @@ func (h *Handler) dropAttachmentsBy(field string, id uint) {
 			continue
 		}
 		seen[a.Hash] = true
-		h.cleanupOrphanFile(a.Hash, a.Mime)
+		h.cleanupOrphanFile(a.Hash, a.Mime, a.Storage)
 	}
 }
 

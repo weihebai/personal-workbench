@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
@@ -77,7 +78,20 @@ func main() {
 
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	// 访问日志脱敏：分享 Token 是「知道就能看」的凭据，
+	// 不能原样落进日志文件或被转发到日志平台。
+	r.Use(gin.LoggerWithFormatter(func(p gin.LogFormatterParams) string {
+		pth := p.Path
+		if strings.HasPrefix(pth, "/api/public/contents/") {
+			pth = "/api/public/contents/[redacted]"
+		}
+		if strings.HasPrefix(pth, "/share/") {
+			pth = "/share/[redacted]"
+		}
+		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n",
+			p.TimeStamp.Format("2006/01/02 - 15:04:05"),
+			p.StatusCode, p.Latency, p.ClientIP, p.Method, pth)
+	}), gin.Recovery())
 
 	// CORS：开发环境前端 5173 独立访问
 	corsCfg := cors.DefaultConfig()
@@ -104,6 +118,10 @@ func main() {
 		// 安全性靠哈希本身——它是 256 位内容哈希，猜不出来，
 		// 等同于一条不可枚举的直达链接（和对象存储的预签名 URL 一个道理）。
 		api.GET("/attachments/:hash/raw", h.ServeAttachment)
+
+		// 公开分享读取：外部客户没有账号，不能放在鉴权组里。
+		// 安全性靠 256 位随机 Token，且所有失败统一 404。
+		api.GET("/public/contents/:token", h.GetPublicContent)
 
 		authed := api.Group("")
 		authed.Use(mgr.Middleware(ah.TokenValid))
@@ -184,6 +202,23 @@ func main() {
 			// MCP 连接设置（设置页展示/重置令牌）
 			authed.GET("/settings/mcp", h.GetMcpSetting)
 			authed.PUT("/settings/mcp", h.UpdateMcpSetting)
+			authed.GET("/settings/r2", h.GetR2Setting)
+			authed.PUT("/settings/r2", h.UpdateR2Setting)
+			authed.POST("/settings/r2/test", h.TestR2Setting)
+			authed.DELETE("/settings/r2", h.DeleteR2Setting)
+
+			// 内容库（Markdown 笔记 / 文章 / 客户素材，可生成公开分享链接）
+			authed.GET("/contents", h.ListContents)
+			authed.GET("/contents/stats", h.ContentStats)
+			authed.POST("/contents", h.CreateContent)
+			authed.POST("/contents/from-idea", h.CreateContentFromIdea)
+			authed.GET("/contents/:id", h.GetContent)
+			authed.PUT("/contents/:id", h.UpdateContent)
+			authed.DELETE("/contents/:id", h.DeleteContent)
+
+			authed.POST("/contents/:id/share", h.ShareContent)
+			authed.POST("/contents/:id/share/rotate", h.RotateContentShare)
+			authed.DELETE("/contents/:id/share", h.RevokeContentShare)
 		}
 	}
 
@@ -216,6 +251,11 @@ func main() {
 		}
 		r.Static("/assets", filepath.Join(root, "assets"))
 		r.NoRoute(func(c *gin.Context) {
+			// 公开分享页是 SPA 路由，也要带上不收索引 / 不传 Referer 的头
+			if strings.HasPrefix(c.Request.URL.Path, "/share/") {
+				c.Header("X-Robots-Tag", "noindex, nofollow, noarchive")
+				c.Header("Referrer-Policy", "no-referrer")
+			}
 			// 根目录下的静态文件（favicon.ico / favicon.svg / site.webmanifest /
 			// apple-touch-icon.png / icons/*）不属于 /assets，之前会被通配成
 			// index.html —— 浏览器拿到的是一段 HTML，图标就一直是默认的空白页。

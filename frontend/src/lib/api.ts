@@ -155,6 +155,7 @@ export interface Attachment {
   height: number
   taskId?: number | null
   projectId?: number | null
+  contentId?: number | null
   url: string
   createdAt: string
 }
@@ -276,4 +277,61 @@ export interface IdeaStats {
   byStatus: { inbox: number; reading: number; digested: number; archived: number }
   total: number
   starred: number
+}
+
+/* ---------- 内容库 ---------- */
+
+export type ContentKind = 'pitfall' | 'article' | 'client' | 'note'
+export type ContentStatus = 'draft' | 'ready' | 'published' | 'archived'
+
+export interface Content {
+  id: number
+  title: string
+  kind: ContentKind
+  status: ContentStatus
+  /** 列表接口不返回正文，只有详情才有 */
+  body?: string
+  tags: string
+  sourceIdeaId?: number | null
+  projectId?: number | null
+  clientId?: number | null
+  shareExpiresAt?: string | null
+  /** 以下为后端回填的只读字段 */
+  tagList: string[]
+  projectName?: string
+  clientName?: string
+  sourceIdeaTitle?: string
+  shareEnabled: boolean
+  shareExpired: boolean
+  sharePath?: string
+  excerpt: string
+  attachmentCount: number
+  coverUrl?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ContentStats {
+  total: number
+  byKind: Record<ContentKind, number>
+  byStatus: Record<ContentStatus, number>
+  shared: number
+}
+
+export interface ContentInput {
+  title: string
+  kind: ContentKind
+  status: ContentStatus
+  body: string
+  tags: string
+  projectId?: number | null
+  clientId?: number | null
+}
+
+export interface PublicContent {
+  title: string
+  body: string
+  tags: string[]
+  updatedAt: string
+  attachments: { url: string; width: number; height: number }[]
 }

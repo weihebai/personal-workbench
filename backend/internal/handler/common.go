@@ -1,9 +1,16 @@
 package handler
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
+	"io"
 	"math"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -12,6 +19,7 @@ import (
 	"gorm.io/gorm"
 
 	"personal-workbench/internal/config"
+	"personal-workbench/internal/model"
 )
 
 type Handler struct {
@@ -24,6 +32,113 @@ type Handler struct {
 
 func New(db *gorm.DB, cfg *config.Config) *Handler { return &Handler{DB: db, Cfg: cfg} }
 
+// R2 配置存设置表。Secret 用 data/.r2_secret 派生密钥加密，
+// 备份包不含这个文件，换服务器后需重新填写 R2 密钥。
+const (
+	r2AccountKey         = "r2_account_id"
+	r2BucketKey          = "r2_bucket"
+	r2CredentialIDKey    = "v2_access_key_id"
+	r2CredentialValueKey = "v2_secret_access_key"
+	r2JurisdictionKey    = "r2_jurisdiction"
+	r2ConfiguredKey      = "r2_configured"
+	secretCipherLabel    = "workbench-r2-secret-v2"
+)
+
+func (h *Handler) localSecretKey() ([]byte, error) {
+	path := filepath.Join(".", ".r2_secret")
+	if h.Cfg.DBPath != "" {
+		path = filepath.Join(filepath.Dir(h.Cfg.DBPath), ".r2_secret")
+	}
+	if b, err := os.ReadFile(path); err == nil && len(b) >= 32 {
+		return b[:32], nil
+	}
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	if err := os.WriteFile(path, buf, 0o600); err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+func (h *Handler) encryptSecret(v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	key, err := h.localSecretKey()
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", err
+	}
+	sealed := gcm.Seal(nonce, nonce, []byte(v), []byte(secretCipherLabel))
+	return base64.StdEncoding.EncodeToString(sealed), nil
+}
+
+func (h *Handler) decryptSecret(v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	key, err := h.localSecretKey()
+	if err != nil {
+		return "", err
+	}
+	raw, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		return "", err
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", err
+	}
+	if len(raw) < gcm.NonceSize() {
+		return "", errors.New("R2 密钥数据损坏")
+	}
+	plain, err := gcm.Open(nil, raw[:gcm.NonceSize()], raw[gcm.NonceSize():], []byte(secretCipherLabel))
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
+func (h *Handler) settingValue(key string) string {
+	var s model.Setting
+	if err := h.DB.Where("`key` = ?", key).First(&s).Error; err != nil {
+		return ""
+	}
+	return s.Value
+}
+
+func (h *Handler) saveSetting(key, value string) error {
+	if value == "" {
+		return h.DB.Delete(&model.Setting{}, "`key` = ?", key).Error
+	}
+	var s model.Setting
+	if err := h.DB.Where("`key` = ?", key).First(&s).Error; err != nil {
+		s = model.Setting{Key: key}
+	}
+	s.Value = value
+	return h.DB.Save(&s).Error
+}
+
 // ---------- 通用工具 ----------
 
 func fail(c *gin.Context, code int, msg string) {
@@ -31,8 +146,8 @@ func fail(c *gin.Context, code int, msg string) {
 }
 
 func badRequest(c *gin.Context, msg string) { fail(c, http.StatusBadRequest, msg) }
-func notFound(c *gin.Context, msg string)  { fail(c, http.StatusNotFound, msg) }
-func serverErr(c *gin.Context, err error)  { fail(c, http.StatusInternalServerError, err.Error()) }
+func notFound(c *gin.Context, msg string)   { fail(c, http.StatusNotFound, msg) }
+func serverErr(c *gin.Context, err error)   { fail(c, http.StatusInternalServerError, err.Error()) }
 
 func paramUint(c *gin.Context, key string) (uint, bool) {
 	v, err := strconv.ParseUint(c.Param(key), 10, 64)

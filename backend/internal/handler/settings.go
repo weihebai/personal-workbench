@@ -5,12 +5,15 @@ package handler
 // - 通用设置：走白名单，前端传了没定义的键直接忽略，脏数据进不了库
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"personal-workbench/internal/model"
+	"personal-workbench/internal/storage"
 
 	"github.com/gin-gonic/gin"
 )
@@ -63,6 +66,192 @@ func (h *Handler) UpdateMcpSetting(c *gin.Context) {
 		h.DB.Save(&model.Setting{Key: mcpTokenKey, Value: tok})
 	}
 	c.JSON(http.StatusOK, gin.H{"token": h.McpToken()})
+}
+
+type r2Input struct {
+	AccountID       string `json:"accountId"`
+	Bucket          string `json:"bucket"`
+	AccessKeyID     string `json:"accessKeyId"`
+	SecretAccessKey string `json:"secretAccessKey"`
+	Jurisdiction    string `json:"jurisdiction"`
+}
+
+var r2SettingKeys = []string{
+	r2AccountKey, r2BucketKey, r2CredentialIDKey, r2CredentialValueKey, r2JurisdictionKey, r2ConfiguredKey,
+}
+
+func (in *r2Input) normalize() {
+	in.AccountID = strings.TrimSpace(in.AccountID)
+	in.Bucket = strings.TrimSpace(in.Bucket)
+	in.AccessKeyID = strings.TrimSpace(in.AccessKeyID)
+	in.SecretAccessKey = strings.TrimSpace(in.SecretAccessKey)
+	in.Jurisdiction = strings.TrimSpace(in.Jurisdiction)
+}
+
+func (in r2Input) config() storage.R2Config {
+	return storage.R2Config{
+		AccountID:       in.AccountID,
+		Bucket:          in.Bucket,
+		AccessKeyID:     in.AccessKeyID,
+		SecretAccessKey: in.SecretAccessKey,
+		Jurisdiction:    in.Jurisdiction,
+	}
+}
+
+func (h *Handler) GetR2Setting(c *gin.Context) {
+	c.JSON(http.StatusOK, h.r2SettingView())
+}
+
+func (h *Handler) TestR2Setting(c *gin.Context) {
+	var in r2Input
+	if err := c.ShouldBindJSON(&in); err != nil {
+		badRequest(c, "参数错误")
+		return
+	}
+	in.normalize()
+	cfg := in.config()
+	if cfg.AccessKeyID == "" {
+		cfg.AccessKeyID = h.settingValue(r2CredentialIDKey)
+	}
+	if cfg.Jurisdiction == "" {
+		cfg.Jurisdiction = h.settingValue(r2JurisdictionKey)
+	}
+	if cfg.SecretAccessKey == "" {
+		secret, err := h.decryptSecret(h.settingValue(r2CredentialValueKey))
+		if err != nil {
+			serverErr(c, err)
+			return
+		}
+		cfg.SecretAccessKey = secret
+	}
+	client, err := storage.NewR2(cfg)
+	if err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+	if err := client.Check(ctx); err != nil {
+		badRequest(c, "连接失败："+err.Error())
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func (h *Handler) UpdateR2Setting(c *gin.Context) {
+	var in r2Input
+	if err := c.ShouldBindJSON(&in); err != nil {
+		badRequest(c, "参数错误")
+		return
+	}
+	in.normalize()
+	cfg := in.config()
+	if cfg.AccountID == "" || cfg.Bucket == "" {
+		badRequest(c, "Account ID、Bucket 不能为空")
+		return
+	}
+	if cfg.Jurisdiction != "" && cfg.Jurisdiction != "eu" {
+		badRequest(c, "区域只能是默认或 EU")
+		return
+	}
+	if cfg.AccessKeyID == "" {
+		cfg.AccessKeyID = h.settingValue(r2CredentialIDKey)
+	}
+	if cfg.AccessKeyID == "" {
+		badRequest(c, "Access Key ID 不能为空")
+		return
+	}
+	var r2Files int64
+	h.DB.Model(&model.Attachment{}).Where("storage = ?", "r2").Count(&r2Files)
+	if r2Files > 0 &&
+		(cfg.AccountID != h.settingValue(r2AccountKey) || cfg.Bucket != h.settingValue(r2BucketKey)) {
+		badRequest(c, "已有图片存储在 R2，不能更换 Account ID 或 Bucket")
+		return
+	}
+	secret := cfg.SecretAccessKey
+	if secret == "" {
+		stored, err := h.decryptSecret(h.settingValue(r2CredentialValueKey))
+		if err != nil {
+			serverErr(c, err)
+			return
+		}
+		secret = stored
+	}
+	if secret == "" {
+		badRequest(c, "Secret Access Key 不能为空")
+		return
+	}
+	cfg.SecretAccessKey = secret
+
+	client, err := storage.NewR2(cfg)
+	if err != nil {
+		badRequest(c, err.Error())
+		return
+	}
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 20*time.Second)
+	defer cancel()
+	if err := client.Check(ctx); err != nil {
+		badRequest(c, "连接失败："+err.Error())
+		return
+	}
+
+	encrypted, err := h.encryptSecret(secret)
+	if err != nil {
+		serverErr(c, err)
+		return
+	}
+	for key, value := range map[string]string{
+		r2AccountKey:         cfg.AccountID,
+		r2BucketKey:          cfg.Bucket,
+		r2CredentialIDKey:    cfg.AccessKeyID,
+		r2CredentialValueKey: encrypted,
+		r2JurisdictionKey:    cfg.Jurisdiction,
+		r2ConfiguredKey:      "1",
+	} {
+		if err := h.saveSetting(key, value); err != nil {
+			serverErr(c, err)
+			return
+		}
+	}
+	h.GetR2Setting(c)
+}
+
+func (h *Handler) DeleteR2Setting(c *gin.Context) {
+	var r2Files int64
+	h.DB.Model(&model.Attachment{}).Where("storage = ?", "r2").Count(&r2Files)
+	if r2Files > 0 {
+		badRequest(c, "已有图片存储在 R2，不能清除配置；请先迁移或删除这些图片")
+		return
+	}
+	for _, key := range r2SettingKeys {
+		if err := h.saveSetting(key, ""); err != nil {
+			serverErr(c, err)
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+func maskSecret(v string) string {
+	if len(v) <= 8 {
+		return "••••••••"
+	}
+	return v[:4] + "••••••••" + v[len(v)-4:]
+}
+
+func (h *Handler) r2SettingView() gin.H {
+	configured := h.settingValue(r2ConfiguredKey) == "1"
+	accessKey := ""
+	if configured {
+		accessKey = maskSecret(h.settingValue(r2CredentialIDKey))
+	}
+	return gin.H{
+		"configured":        configured,
+		"accountId":         h.settingValue(r2AccountKey),
+		"bucket":            h.settingValue(r2BucketKey),
+		"accessKeyIdMasked": accessKey,
+		"jurisdiction":      h.settingValue(r2JurisdictionKey),
+	}
 }
 
 // ---------- 通用设置 ----------

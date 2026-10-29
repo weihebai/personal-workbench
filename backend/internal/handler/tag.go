@@ -53,12 +53,13 @@ func (h *Handler) DeleteTag(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// 全局搜索：跨项目 / 任务 / 灵感 / 提醒 / 客户
+// 全局搜索：跨项目 / 任务 / 灵感 / 内容 / 提醒 / 客户
 func (h *Handler) Search(c *gin.Context) {
 	s := strings.TrimSpace(c.Query("q"))
 	if s == "" {
 		c.JSON(http.StatusOK, gin.H{
 			"projects": []any{}, "tasks": []any{}, "ideas": []any{},
+			"contents":  []any{},
 			"reminders": []any{}, "clients": []any{},
 		})
 		return
@@ -72,12 +73,21 @@ func (h *Handler) Search(c *gin.Context) {
 	var ideas []model.Idea
 	h.DB.Where("title LIKE ? OR content LIKE ? OR note LIKE ? OR tags LIKE ?", like, like, like, like).
 		Order("created_at DESC").Limit(6).Find(&ideas)
+	// 内容库只取列表需要的字段，不把整篇正文带回搜索接口
+	var contents []model.Content
+	h.DB.Select("id, title, kind, status, tags, updated_at").
+		Where("title LIKE ? OR body LIKE ? OR tags LIKE ?", like, like, like).
+		Order("updated_at DESC").Limit(6).Find(&contents)
+	for i := range contents {
+		contents[i].TagList = splitTags(contents[i].Tags)
+	}
 	var reminders []model.Reminder
 	h.DB.Where("title LIKE ? OR target LIKE ?", like, like).Limit(8).Find(&reminders)
 	var clients []model.Client
 	h.DB.Where("name LIKE ? OR contact LIKE ?", like, like).Limit(8).Find(&clients)
 	c.JSON(http.StatusOK, gin.H{
 		"projects": projects, "tasks": tasks, "ideas": ideas,
+		"contents":  contents,
 		"reminders": reminders, "clients": clients,
 	})
 }

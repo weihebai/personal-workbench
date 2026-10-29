@@ -8,6 +8,7 @@ import (
 	"personal-workbench/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
 
 type ideaInput struct {
@@ -323,7 +324,14 @@ func (h *Handler) DeleteIdea(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if err := h.DB.Delete(&model.Idea{}, id).Error; err != nil {
+	err := h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Delete(&model.Idea{}, id).Error; err != nil {
+			return err
+		}
+		// 已经整理出来的内容不受影响，只清掉来源关联
+		return tx.Model(&model.Content{}).Where("source_idea_id = ?", id).Update("source_idea_id", nil).Error
+	})
+	if err != nil {
 		serverErr(c, err)
 		return
 	}

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ImagePlus, X, Loader2, ClipboardPaste, Check } from 'lucide-react'
 import { api, errMsg, type Attachment } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { ImageLightbox, type LightboxImage } from '@/components/ui/ImageLightbox'
 
 /**
  * 图片附件。
@@ -22,28 +23,34 @@ import { cn } from '@/lib/utils'
 export function AttachmentGallery({
   taskId,
   projectId,
+  contentId,
   readOnly,
   enablePaste,
+  onInsert,
 }: {
   taskId?: number
   projectId?: number
+  contentId?: number
   readOnly?: boolean
   /** 是否监听全局粘贴。同一个页面里只应该有一处开启，否则一次粘贴传两份。 */
   enablePaste?: boolean
+  /** 传入后在缩略图上显示「插入正文」。 */
+  onInsert?: (attachment: Attachment) => void
 }) {
   const qc = useQueryClient()
   const inputRef = useRef<HTMLInputElement>(null)
   const [err, setErr] = useState('')
   const [dragging, setDragging] = useState(false)
+  const [preview, setPreview] = useState<LightboxImage | null>(null)
   // 粘贴成功后的浮层提示：图片区在弹窗底部，可能不在视野里，
   // 没有这个提示用户不知道图到底贴进去没有
   const [flash, setFlash] = useState('')
 
-  const params = taskId ? { taskId } : projectId ? { projectId } : {}
-  const enabled = !!(taskId || projectId)
+  const params = taskId ? { taskId } : projectId ? { projectId } : contentId ? { contentId } : {}
+  const enabled = !!(taskId || projectId || contentId)
 
   const { data } = useQuery({
-    queryKey: ['attachments', taskId ?? 0, projectId ?? 0],
+    queryKey: ['attachments', taskId ?? 0, projectId ?? 0, contentId ?? 0],
     queryFn: async () => (await api.get<{ items: Attachment[] }>('/attachments', { params })).data.items,
     enabled,
   })
@@ -57,6 +64,7 @@ export function AttachmentGallery({
       fd.append('file', file)
       if (taskId) fd.append('taskId', String(taskId))
       if (projectId) fd.append('projectId', String(projectId))
+      if (contentId) fd.append('contentId', String(contentId))
       return (await api.post('/attachments', fd)).data
     },
     onSuccess: () => {
@@ -108,7 +116,7 @@ export function AttachmentGallery({
     return () => window.removeEventListener('paste', onPaste)
     // upload.mutate 是稳定引用，不需要进依赖
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enablePaste, readOnly, taskId, projectId])
+  }, [enablePaste, readOnly, taskId, projectId, contentId])
 
   if (!enabled) return null
 
@@ -117,14 +125,28 @@ export function AttachmentGallery({
       <div className="flex flex-wrap items-center gap-1.5">
         {items.map((a) => (
           <div key={a.id} className="group relative">
-            <a href={a.url} target="_blank" rel="noreferrer" title={`${a.name} · ${a.width}×${a.height}`}>
+            <button
+              type="button"
+              onClick={() => setPreview({ src: a.url, alt: a.name })}
+              title={`${a.name} · ${a.width}×${a.height} · 点击预览`}
+              className="block"
+            >
               <img
                 src={a.url}
                 alt={a.name}
                 loading="lazy"
-                className="h-16 w-16 rounded-md border border-[var(--border)] object-cover transition-opacity hover:opacity-80"
+                className="h-16 w-16 cursor-zoom-in rounded-md border border-[var(--border)] object-cover transition-opacity hover:opacity-80"
               />
-            </a>
+            </button>
+            {onInsert && (
+              <button
+                type="button"
+                onClick={() => onInsert(a)}
+                className="absolute inset-x-1 bottom-1 rounded bg-ink-900/75 py-0.5 text-[9px] font-medium text-white opacity-100 transition-opacity hover:bg-ink-900 sm:opacity-0 sm:group-hover:opacity-100"
+              >
+                插入正文
+              </button>
+            )}
             {!readOnly && (
               <button
                 type="button"
@@ -196,6 +218,8 @@ export function AttachmentGallery({
           拖图片进来也行
         </p>
       )}
+
+      <ImageLightbox image={preview} onClose={() => setPreview(null)} />
     </div>
   )
 }

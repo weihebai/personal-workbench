@@ -13,8 +13,11 @@ import TasksPage from './pages/TasksPage'
 import PaymentsPage from './pages/PaymentsPage'
 import RemindersPage from './pages/RemindersPage'
 import IdeasPage from './pages/IdeasPage'
+import ContentsPage from './pages/ContentsPage'
+import ContentEditorPage from './pages/ContentEditorPage'
 import ClientsPage from './pages/ClientsPage'
 import SettingsPage from './pages/SettingsPage'
+import PublicSharePage from './pages/PublicSharePage'
 import { getToken } from './lib/api'
 
 const queryClient = new QueryClient({
@@ -34,6 +37,8 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          {/* 公开分享阅读页：不需要登录，也不能套 AppShell */}
+          <Route path="/share/:token" element={<PublicSharePage />} />
           <Route
             element={
               <RequireAuth>
@@ -48,6 +53,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/reminders" element={<RemindersPage />} />
             <Route path="/ideas" element={<IdeasPage />} />
+            <Route path="/contents" element={<ContentsPage />} />
+            <Route path="/contents/new" element={<ContentEditorPage />} />
+            <Route path="/contents/:id" element={<ContentEditorPage />} />
             <Route path="/clients" element={<ClientsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
           </Route>

@@ -17,8 +17,9 @@
 | **任务** | 看板拖拽（待办/进行中/已完成）+ 列表视图，支持优先级、截止日、工时、预算 |
 | **到期提醒** | **证书/域名/服务器/客户续费** 通用到期提醒，按剩余天数分级预警 |
 | **灵感记录** | **收件箱式**收集公众号/开源项目/文章，粘链接即存，之后逐条消化 |
+| **内容库** | **Markdown 编写/预览**，固定类型 + 标签，可传图，可从灵感一键整理，生成**可撤销的公开只读链接** |
 | **客户** | 联系人、电话、微信、来源渠道（闲鱼/小红书/熟人…） |
-| **全局搜索** | `按 /` 唤起，跨项目、任务、灵感、提醒、客户检索 |
+| **全局搜索** | `按 /` 唤起，跨项目、任务、灵感、内容、提醒、客户检索 |
 | **设置** | 账号信息、修改密码、部署与安全说明 |
 
 **移动端**：底部 Tab 导航 + 响应式卡片，手机浏览器直接可用，无需 App。
@@ -81,6 +82,42 @@
 - **消化流程**：待看 → 在看 → 已消化 → 已归档，一键切换
 - **星级**：一般 / 有用 / 很有价值，可以只看「精选」
 - 支持标签（AI、前端、副业…）和关联到具体项目
+- **整理成内容**：一键把「我的想法 + 原文摘录 + 来源链接」带进内容库，继续写成文章或客户素材
+
+### 内容库与分享链接
+
+灵感负责「收集」，内容库负责「打磨」和「发出去」。开发中踩的坑、整理好的文章、给客户的方案素材，都放在这里。
+
+**四种固定类型**，平台和审核阶段这类细分维度用标签表达（如 `微信小程序,备案`）：
+
+| 类型 | 用途 |
+|---|---|
+| 经验避坑 | 备案驳回原因、踩坑记录，下次提交前先搜一遍 |
+| 文章草稿 | 从灵感整理出来，继续写成可发布的文章 |
+| 客户素材 | 发给客户看的需求说明、操作文档、方案 |
+| 笔记 | 不属于以上三类的零散记录 |
+
+状态分为草稿 / 待发 / 已发布 / 已归档，只用于个人整理，和是否开启分享互不影响。
+
+- **Markdown 编写**：桌面左写右看，移动端切换「编辑 / 预览」；支持标题、列表、表格、代码块、任务列表
+- **从灵感整理**：灵感卡片点「整理成内容」，自动带入想法、摘录和来源链接；同一灵感重复点击打开同一条，不会重复创建
+- **图片附件**：拖拽、选择或 `Ctrl+V` 粘贴，复用现有内容寻址上传与去重；上传后可以一键「插入正文」，正文里也能直接粘图或点工具栏图片按钮，Markdown 会写入 `![描述](地址)`
+- **点图预览**：正文和附件里的图片点击后在页面内弹窗查看，不跳新标签页；`Esc` 或点空白处关闭
+- **标签**：逗号分隔，自动去重，最多 10 个
+- **关联**：可以挂到具体项目、客户，并保留来源灵感
+
+#### 公开分享链接
+
+内容编辑页可以生成一条**无需登录的只读链接**（`/share/<token>`）：
+
+- **有效期**：永久 / 7 天 / 30 天，生成后还能改
+- **撤销**：撤销后链接立即失效
+- **轮换**：换一条新链接，旧链接立刻失效，适合链接被转发后收回
+- **默认不分享**：必须手动生成，不会因为保存或发布状态自动公开
+- **公开页**：只显示标题、标签、更新时间和正文、图片，不暴露内容 ID、状态、项目/客户、分享 Token
+- **安全**：正文不渲染原始 HTML，链接只允许 `http` / `https` / `mailto`；公开接口带 `no-store`、`noindex`、`no-referrer`、`nosniff` 响应头
+
+> 撤销只让分享链接失效，**已经拿到的图片直链仍然可以打开**。图片读取沿用内容哈希不可枚举的设计，需要更严时可以后续改成带分享 Token 校验的图片代理。
 
 ---
 
@@ -95,14 +132,16 @@
 
 ### 图片附件
 
-截图、参考图直接拖进任务或项目里，也可以 `Ctrl+V` 直接粘贴截图。
+截图、参考图直接拖进任务、项目或内容里，也可以 `Ctrl+V` 直接粘贴截图。一张图只能归属任务、项目、内容中的一处。点击缩略图在页面内弹窗预览，不跳新标签页。
 
-- **存在服务器磁盘**：`data/uploads/<哈希前2位>/<sha256>.<后缀>`，和数据库同一个 `data/` 目录，备份时一个目录全带走，不需要对象存储和密钥
+- **默认存在服务器磁盘**：`data/uploads/<哈希前2位>/<sha256>.<后缀>`；也可在设置页接入 Cloudflare R2，新图片直接写入私有 Bucket
 - **按内容哈希命名**：同一张图传两次只占一份空间；同一张图可以挂到多个任务上，各存一条记录、磁盘共用一份文件
 - **库里只存元数据**：哈希、类型、尺寸、大小。不存 base64——那会让体积涨 33%，列表查询还得拖着二进制
 - **只认真正的图片**：按文件头解码校验，改后缀骗不过去；单张上限 10MB（`MAX_UPLOAD_MB` 可调）
-- **删除会清磁盘**：删图片时，如果没有别的记录还引用同一个文件，就把磁盘文件一起删掉（有引用则保留）；删任务、删项目也会连带清理名下图片
+- **删除会清磁盘**：删图片时，如果没有别的记录还引用同一个文件，就把磁盘文件一起删掉（有引用则保留）；删任务、删项目、删内容也会连带清理名下图片
 - **读取不鉴权**：`<img src>` 带不上 Authorization 头，所以读图路由放在鉴权外。安全性靠 256 位内容哈希本身不可枚举——等同一条直达链接，和对象存储的预签名 URL 同理
+
+R2 配置在设置页填写，保存时先做一次上传、读取、删除测试。密钥加密后存数据库，读接口只返回脱敏 Access Key。Bucket 使用 EU jurisdiction 时在设置页选择 `EU`。已有 R2 图片时不能更换 Account ID、Bucket 或切换回本地存储；备份包会包含 R2 图片，但不包含 R2 凭据。
 
 ---
 
@@ -264,6 +303,11 @@ docker compose logs -f workbench
 
 **安全特性**：源站**不开放任何入站端口**，cloudflared 主动外连；SSL 由 Cloudflare 托管，无需 Certbot。
 
+> ⚠️ 如果给整个域名启用了 **Cloudflare Access**，外部客户打开分享链接会被登录页挡住。
+> 需要在 Access 应用里为以下路径配置 **Bypass**：
+> `/share/*`、`/api/public/*`、`/api/attachments/*/raw`。
+> 不加 Access 则无需配置。
+
 ### 3. 数据持久化（重要）
 
 **所有数据都存放在宿主机上，不在容器内部。** 容器是无状态的，删掉容器、拉新镜像都不会丢数据。
@@ -279,7 +323,7 @@ volumes:
 
 | 文件 | 说明 |
 |---|---|
-| `workbench.db` | **SQLite 数据库**：项目、客户、收款、任务、提醒、里程碑、账号、登录限流记录 |
+| `workbench.db` | **SQLite 数据库**：项目、客户、收款、任务、提醒、里程碑、灵感、内容库与分享状态、账号、登录限流记录 |
 | `workbench.db-wal` | 预写日志，运行期间新数据先写这里 |
 | `workbench.db-shm` | WAL 共享内存索引 |
 | `.jwt_secret` | JWT 签名密钥（删了会导致所有登录失效） |
@@ -439,8 +483,8 @@ POST   /api/tasks/:id/subtasks/bulk  多行文本一次拆成多步
 PUT    /api/subtasks/:id          改标题 / 勾选完成
 DELETE /api/subtasks/:id
 
-POST   /api/attachments           上传图片（multipart: file + taskId?/projectId?）
-GET    /api/attachments           图片列表（按 taskId/projectId 筛）
+POST   /api/attachments           上传图片（multipart: file + taskId?/projectId?/contentId?）
+GET    /api/attachments           图片列表（按 taskId/projectId/contentId 筛）
 GET    /api/attachments/:hash/raw 读取图片（不鉴权，靠哈希不可枚举）
 DELETE /api/attachments/:id       删记录（磁盘文件按哈希共享，不在此删）
 
@@ -473,11 +517,35 @@ DELETE /api/ideas/:id
 
 GET    /api/backup/export         导出备份包（zip：数据库快照 + 全部图片）
 POST   /api/backup/import         导入备份包（multipart: file，整库覆盖，不可恢复）
+
+GET    /api/contents              内容列表（支持 q/kind/status/projectId/clientId）
+GET    /api/contents/stats        总数、按类型/状态统计、有效分享数
+POST   /api/contents
+POST   /api/contents/from-idea    从灵感生成（幂等，已存在返回原内容）
+GET    /api/contents/:id          详情（含正文、附件数、封面、分享状态）
+PUT    /api/contents/:id
+DELETE /api/contents/:id          软删除，同时清理附件和分享
+POST   /api/contents/:id/share    生成或更新分享链接（expiresInDays: 0/7/30）
+POST   /api/contents/:id/share/rotate  轮换 Token（旧链接立即失效）
+DELETE /api/contents/:id/share    撤销分享
+
+GET    /api/public/contents/:token  公开只读读取（不鉴权，Token 不可枚举）
 ```
 
-除 `/api/auth/login` 与 `/api/health` 外均需 `Authorization: Bearer <token>`。
+除以下公开接口外，其余接口均需 `Authorization: Bearer <token>`：
 
-唯一例外是 `GET /api/attachments/:hash/raw`：`<img>` 标签由浏览器自己发起请求，带不上自定义请求头，所以读图不校验 JWT。它靠 256 位内容哈希保证不可枚举——猜不到就等于拿不到，和对象存储预签名 URL 同一思路。若要更严，可改成带时效的签名 URL，或把整个站点放进 Cloudflare Access 后面。
+| 公开接口 | 说明 |
+|---|---|
+| `POST /api/auth/login` | 登录 |
+| `GET /api/health` | 健康检查 |
+| `GET /api/public/contents/:token` | 公开分享内容，只返回标题、正文、标签、更新时间、图片 |
+| `GET /api/attachments/:hash/raw` | 图片直链 |
+
+`/api/public/contents/:token` 的 Token 是 64 位随机十六进制，猜不到就等于拿不到；Token 不存在、已撤销、已过期、内容已删除或已轮换时，统一返回 404 和「分享不存在或已失效」，不区分具体原因。
+
+`GET /api/attachments/:hash/raw` 不鉴权是因为 `<img>` 标签由浏览器自己发起请求，带不上自定义请求头。它靠 256 位内容哈希保证不可枚举——和对象存储预签名 URL 同一思路。若要更严，可改成带时效的签名 URL，或把站点放进 Cloudflare Access 后面（注意给分享路径配 Bypass）。
+
+图片存储可在设置页切换到 Cloudflare R2，无需额外环境变量；切换后新上传图片写入 R2，历史图片按各自记录继续从原存储读取。
 
 ---
 
@@ -487,9 +555,13 @@ POST   /api/backup/import         导入备份包（multipart: file，整库覆�
 - JWT 短期有效（默认 7 天）
 - **退出即吊销**：登出或修改密码会让该账号的 token 版本号自增，旧 token 立刻失效，不用等到过期
 - **登录失败限流**：同一 IP 连续 5 次失败锁定 10 分钟，前 4 次会提示剩余尝试次数；记录存在 SQLite 里，重启不会清零
+- **分享 Token 不进日志**：访问日志里的 `/share/<token>` 与 `/api/public/contents/<token>` 统一打印为 `[redacted]`；Token 字段不直接返回给前端，公开接口只输出内容白名单
+- **公开页防收录**：分享页注入 `noindex, nofollow` 与 `no-referrer`，接口响应带 `Cache-Control: no-store`、`X-Robots-Tag`、`X-Content-Type-Options: nosniff`
+- **Markdown 安全渲染**：不渲染原始 HTML，经过 `rehype-sanitize`，链接协议限制为 `http` / `https` / `mailto`，外链带 `noopener noreferrer nofollow`
+- **撤销不等于删除图片**：撤销分享让页面链接立即 404，但已拿到的图片直链仍可访问（内容哈希不可枚举）
 - 无注册入口，仅单账号
 - Cloudflare Tunnel 隐藏源站 IP
-- 可选：在 Cloudflare 侧开启 Access 应用层鉴权做二次保护
+- 可选：在 Cloudflare 侧开启 Access 应用层鉴权做二次保护（为分享路径配置 Bypass）
 
 ---
 

@@ -14,6 +14,8 @@ package handler
 
 import (
 	"archive/zip"
+	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -85,6 +87,11 @@ func (h *Handler) ExportBackup(c *gin.Context) {
 		serverErr(c, fmt.Errorf("生成数据库快照失败: %w", err))
 		return
 	}
+	// R2 凭据与当前机器绑定，不写入备份包。
+	if err := stripSettings(dbPath, r2SettingKeys); err != nil {
+		serverErr(c, fmt.Errorf("清理备份配置失败: %w", err))
+		return
+	}
 	dbStat, err := os.Stat(dbPath)
 	if err != nil {
 		serverErr(c, err)
@@ -127,6 +134,36 @@ func (h *Handler) ExportBackup(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
+	var remote []model.Attachment
+	h.DB.Select("DISTINCT hash, mime, size").Where("storage = ?", "r2").Find(&remote)
+	for _, a := range remote {
+		ext := allowedImageMime[a.Mime]
+		if ext == "" {
+			ext = ".bin"
+		}
+		uploads = append(uploads, uploadFile{
+			rel:  a.Hash[:2] + "/" + a.Hash + ext,
+			abs:  "r2:" + h.objectKey(a.Hash, ext),
+			size: a.Size,
+		})
+		uploadsBytes += a.Size
+	}
+	// R2 图片可能被多条记录引用，只导出一次
+	seenRel := map[string]bool{}
+	deduped := uploads[:0]
+	for _, u := range uploads {
+		if seenRel[u.rel] {
+			continue
+		}
+		seenRel[u.rel] = true
+		deduped = append(deduped, u)
+	}
+	uploads = deduped
+	dedupedBytes := int64(0)
+	for _, u := range uploads {
+		dedupedBytes += u.size
+	}
+	uploadsBytes = dedupedBytes
 
 	var mf backupManifest
 	mf.Version = backupFormatVersion
@@ -169,7 +206,7 @@ func (h *Handler) ExportBackup(c *gin.Context) {
 	}
 	for _, u := range uploads {
 		// 图片本身已是压缩格式，用 Store 免去无谓的压缩耗时
-		if err := writeZipEntry(zw, backupUploadsPrefix+u.rel, zip.Store, u.abs, u.size); err != nil {
+		if err := h.writeUploadEntry(zw, backupUploadsPrefix+u.rel, u.abs, u.size); err != nil {
 			abort(err)
 			return
 		}
@@ -178,6 +215,43 @@ func (h *Handler) ExportBackup(c *gin.Context) {
 		c.Abort()
 		return
 	}
+}
+
+func (h *Handler) writeUploadEntry(zw *zip.Writer, name, path string, size int64) error {
+	if !strings.HasPrefix(path, "r2:") {
+		return writeZipEntry(zw, name, zip.Store, path, size)
+	}
+	r2, err := h.r2Client()
+	if err != nil {
+		return err
+	}
+	if r2 == nil {
+		return fmt.Errorf("R2 未配置，无法导出远程图片")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	body, actual, _, err := r2.Get(ctx, strings.TrimPrefix(path, "r2:"))
+	if err != nil {
+		return fmt.Errorf("读取 R2 图片失败: %w", err)
+	}
+	defer body.Close()
+	if actual > 0 {
+		size = actual
+	}
+	hdr := &zip.FileHeader{Name: name, Method: zip.Store, Modified: time.Now()}
+	hdr.SetMode(0o644)
+	w, err := zw.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+	n, err := io.Copy(w, body)
+	if err != nil {
+		return err
+	}
+	if n != size {
+		return fmt.Errorf("%s: 写入 %d 字节，预期 %d", name, n, size)
+	}
+	return nil
 }
 
 func writeZipEntry(zw *zip.Writer, name string, method uint16, path string, size int64) error {
@@ -333,16 +407,55 @@ func (h *Handler) ImportBackup(c *gin.Context) {
 		return
 	}
 
+	currentR2 := map[string]string{}
+	for _, key := range r2SettingKeys {
+		currentR2[key] = h.settingValue(key)
+	}
 	counts, err := h.restoreDatabase(restoreDBPath, tables)
 	if err != nil {
 		serverErr(c, err)
 		return
 	}
+	// R2 凭据与当前机器绑定，不随备份迁移；恢复后保留当前设置，
+	// 由用户在新环境设置页重新配置。
+	for key, value := range currentR2 {
+		if err := h.saveSetting(key, value); err != nil {
+			serverErr(c, err)
+			return
+		}
+	}
 
-	// 库已换血，再把图片搬进上传目录。内容寻址：同名即同内容，已存在就跳过。
+	// 库已换血，再把图片搬进当前存储。内容寻址：同名即同内容，已存在就跳过。
 	filesRestored, filesSkipped := 0, 0
+	r2, err := h.r2Client()
+	if err != nil {
+		serverErr(c, err)
+		return
+	}
 	for _, f := range uploadEntries {
 		rel := strings.TrimPrefix(f.Name, backupUploadsPrefix)
+		if r2 != nil {
+			src, openErr := f.Open()
+			if openErr != nil {
+				serverErr(c, openErr)
+				return
+			}
+			data, readErr := io.ReadAll(src)
+			src.Close()
+			if readErr != nil {
+				serverErr(c, readErr)
+				return
+			}
+			ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+			err := r2.Put(ctx, "uploads/"+rel, bytes.NewReader(data), int64(len(data)), "application/octet-stream")
+			cancel()
+			if err != nil {
+				serverErr(c, fmt.Errorf("图片写入 R2 失败: %w", err))
+				return
+			}
+			filesRestored++
+			continue
+		}
 		dst := filepath.Join(h.Cfg.UploadDir, filepath.FromSlash(rel))
 		if err := ensureInsideDir(h.Cfg.UploadDir, dst); err != nil {
 			badRequest(c, "备份包包含可疑的图片路径 "+f.Name)
@@ -363,6 +476,16 @@ func (h *Handler) ImportBackup(c *gin.Context) {
 		filesRestored++
 	}
 
+	// 备份里的附件统一指向当前存储；旧备份没有 storage 列时也在这里纠正
+	storageKind := "local"
+	if r2 != nil {
+		storageKind = "r2"
+	}
+	if err := h.DB.Model(&model.Attachment{}).Where("1 = 1").
+		Update("storage", storageKind).Error; err != nil {
+		serverErr(c, err)
+		return
+	}
 	// 备份可能来自旧版本：结构对齐一下，缺的列由 AutoMigrate 补上
 	if err := h.DB.AutoMigrate(model.AllModels()...); err != nil {
 		serverErr(c, fmt.Errorf("对齐数据库结构失败: %w", err))
@@ -375,6 +498,20 @@ func (h *Handler) ImportBackup(c *gin.Context) {
 		"filesRestored": filesRestored,
 		"filesSkipped":  filesSkipped,
 	})
+}
+
+func stripSettings(dbPath string, keys []string) error {
+	db, err := sql.Open("sqlite", filepath.ToSlash(dbPath)+"?_pragma=busy_timeout(2000)")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	for _, key := range keys {
+		if _, err := db.Exec("DELETE FROM settings WHERE `key` = ?", key); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // zip 条目路径校验：拒绝绝对路径、反斜杠、. 和 ..（zip-slip）

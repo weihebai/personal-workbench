@@ -7,6 +7,7 @@ import {
   Wallet,
   BellRing,
   Lightbulb,
+  LibraryBig,
   Users,
   Settings,
   Search,
@@ -28,6 +29,7 @@ const nav = [
   { to: '/payments', label: '收款', icon: Wallet },
   { to: '/reminders', label: '到期提醒', short: '提醒', icon: BellRing },
   { to: '/ideas', label: '灵感记录', short: '灵感', icon: Lightbulb },
+  { to: '/contents', label: '内容库', short: '内容', icon: LibraryBig },
   { to: '/clients', label: '客户', icon: Users },
 ]
 
@@ -158,10 +160,10 @@ export default function AppShell() {
 
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex h-8 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-2.5 text-xs text-ink-400 transition-colors hover:border-ink-300 hover:text-ink-600 sm:w-56"
+            className="flex h-8 items-center gap-2 rounded-md border border-[var(--border)] bg-white px-2.5 text-xs text-ink-400 transition-colors hover:border-ink-300 hover:text-ink-600 sm:w-64"
           >
-            <Search size={13} />
-            <span className="hidden sm:inline">搜索项目、任务…</span>
+            <Search size={13} className="shrink-0" />
+            <span className="hidden whitespace-nowrap sm:inline">搜索项目、任务、灵感、内容…</span>
             <kbd className="ml-auto hidden rounded border border-ink-200 px-1 text-[10px] text-ink-400 sm:inline">
               /
             </kbd>
@@ -311,6 +313,12 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
         ),
       },
       {
+        title: '内容',
+        hits: (res.contents ?? []).map(
+          (c: any): SearchHit => ({ key: `ct${c.id}`, label: c.title, sub: c.tags, to: `/contents/${c.id}` }),
+        ),
+      },
+      {
         title: '提醒',
         hits: (res.reminders ?? []).map(
           (r: any): SearchHit => ({ key: `r${r.id}`, label: r.title, to: '/reminders' }),
@@ -376,7 +384,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="搜索项目、任务、灵感、提醒、客户…"
+            placeholder="搜索项目、任务、灵感、内容、客户…"
             className="h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-ink-400"
           />
           <button onClick={onClose} className="text-ink-400 hover:text-ink-600">

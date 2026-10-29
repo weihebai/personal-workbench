@@ -3,6 +3,7 @@ package handler
 import (
 	"archive/zip"
 	"bytes"
+	"database/sql"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -17,9 +18,100 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	_ "github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )
+
+func TestBackupExcludesAndPreservesR2Settings(t *testing.T) {
+	h1 := newBackupTestHandler(t)
+	seedBackupData(t, h1)
+	for key, value := range map[string]string{
+		r2AccountKey:         "source-account",
+		r2BucketKey:          "source-bucket",
+		r2CredentialIDKey:    "source-access-key",
+		r2CredentialValueKey: "source-secret",
+		r2ConfiguredKey:      "1",
+	} {
+		if err := h1.saveSetting(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	zipBytes := doExport(t, h1)
+	zr, err := zip.NewReader(bytes.NewReader(zipBytes), int64(len(zipBytes)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var dbEntry *zip.File
+	for _, f := range zr.File {
+		if f.Name == backupDBEntry {
+			dbEntry = f
+		}
+	}
+	if dbEntry == nil {
+		t.Fatal("备份包缺少数据库")
+	}
+	rc, err := dbEntry.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbPath := filepath.Join(t.TempDir(), "backup.db")
+	out, err := os.Create(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := out.ReadFrom(rc); err != nil {
+		t.Fatal(err)
+	}
+	rc.Close()
+	out.Close()
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var n int
+	if err := db.QueryRow("SELECT COUNT(*) FROM settings WHERE `key` IN (?, ?, ?, ?, ?)",
+		r2AccountKey, r2BucketKey, r2CredentialIDKey, r2CredentialValueKey, r2ConfiguredKey).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("备份包不应包含 R2 配置，实际 %d 条", n)
+	}
+
+	h2 := newBackupTestHandler(t)
+	current := map[string]string{
+		r2AccountKey:      "current-account",
+		r2BucketKey:       "current-bucket",
+		r2CredentialIDKey: "current-access-key",
+	}
+	encrypted, err := h2.encryptSecret("current-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current[r2CredentialValueKey] = encrypted
+	for key, value := range current {
+		if err := h2.saveSetting(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := h2.saveSetting(r2ConfiguredKey, ""); err != nil {
+		t.Fatal(err)
+	}
+	if w := doImport(t, h2, zipBytes); w.Code != http.StatusOK {
+		t.Fatalf("导入失败: %d %s", w.Code, w.Body.String())
+	}
+	for key, want := range current {
+		if got := h2.settingValue(key); got != want {
+			t.Fatalf("%s 应保留当前配置 %q，实际 %q", key, want, got)
+		}
+	}
+	if h2.settingValue(r2ConfiguredKey) != "" {
+		t.Fatal("备份包不含 R2 配置时，不应恢复启用状态")
+	}
+}
 
 // 备份测试需要全部业务表 + 独立的 DBPath（导入时要开第二条连接挂库）
 func newBackupTestHandler(t *testing.T) *Handler {
