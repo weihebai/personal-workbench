@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react'
 import {
   Bold,
   Code2,
@@ -10,6 +10,17 @@ import {
   Loader2,
   Pencil,
 } from 'lucide-react'
+import { EditorState } from '@codemirror/state'
+import {
+  EditorView,
+  drawSelection,
+  highlightActiveLine,
+  keymap,
+  placeholder as placeholderExt,
+} from '@codemirror/view'
+import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { markdown } from '@codemirror/lang-markdown'
+import { defaultHighlightStyle, syntaxHighlighting } from '@codemirror/language'
 import { errMsg } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { MarkdownView } from './MarkdownView'
@@ -26,9 +37,23 @@ export type UploadedImage = {
   alt?: string
 }
 
+const editorTheme = EditorView.theme({
+  '&': { backgroundColor: '#ffffff', fontSize: '13px' },
+  '&.cm-focused': { outline: 'none' },
+  '.cm-scroller': {
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    lineHeight: '1.6',
+    minHeight: '360px',
+  },
+  '.cm-content': { padding: '12px 0', caretColor: '#111827' },
+  '.cm-line': { padding: '0 12px' },
+  '.cm-placeholder': { color: '#d1d5db' },
+  '.cm-gutters': { display: 'none' },
+})
+
 /**
  * Markdown 编辑器：桌面左右分栏（左写右看），移动端用 Tab 切换。
- * 工具栏只做最常用的几种包裹，不引入重型编辑器依赖。
+ * 编辑区用 CodeMirror 6 提供语法高亮、撤销栈和快捷键，工具栏只做常用包裹。
  */
 export const MarkdownEditor = forwardRef<
   MarkdownEditorHandle,
@@ -50,49 +75,36 @@ export const MarkdownEditor = forwardRef<
   },
   outerRef,
 ) {
-  const ref = useRef<HTMLTextAreaElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
+  const viewRef = useRef<EditorView | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const valueRef = useRef(value)
   valueRef.current = value
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
-  // textarea 失焦后 selectionStart 仍然可读，但按钮点击会抢走焦点，
-  // 记一份最后的光标位置，保证「插入正文」还能插到原处。
-  const lastSel = useRef<{ start: number; end: number } | null>(null)
+  const onUploadImageRef = useRef(onUploadImage)
+  onUploadImageRef.current = onUploadImage
+  const uploadImagesRef = useRef<(files: File[]) => void>(() => {})
   const [mobileTab, setMobileTab] = useState<'edit' | 'preview'>('edit')
   const [uploading, setUploading] = useState(false)
   const [err, setErr] = useState('')
 
-  const rememberSelection = () => {
-    const el = ref.current
-    if (!el) return
-    lastSel.current = { start: el.selectionStart ?? 0, end: el.selectionEnd ?? 0 }
-  }
-
   const insert = (text: string, block: boolean) => {
-    const el = ref.current
-    const current = valueRef.current
-    let start = el?.selectionStart ?? current.length
-    let end = el?.selectionEnd ?? current.length
-    if (!el || document.activeElement !== el) {
-      start = lastSel.current?.start ?? current.length
-      end = lastSel.current?.end ?? current.length
-    }
-    if (start > end) [start, end] = [end, start]
-
+    const view = viewRef.current
+    if (!view) return
+    const { from, to } = view.state.selection.main
+    const doc = view.state.doc.toString()
     let snippet = text
     if (block) {
-      if (start > 0 && current[start - 1] !== '\n') snippet = `\n\n${snippet}`
-      if (end < current.length && current[end] !== '\n') snippet = `${snippet}\n\n`
+      if (from > 0 && doc[from - 1] !== '\n') snippet = `\n\n${snippet}`
+      if (to < doc.length && doc[to] !== '\n') snippet = `${snippet}\n\n`
     }
-    const next = current.slice(0, start) + snippet + current.slice(end)
-    onChangeRef.current(next)
-    const caret = start + snippet.length
-    lastSel.current = { start: caret, end: caret }
-    requestAnimationFrame(() => {
-      el?.focus()
-      el?.setSelectionRange(caret, caret)
+    view.dispatch({
+      changes: { from, to, insert: snippet },
+      selection: { anchor: from + snippet.length },
+      scrollIntoView: true,
     })
+    view.focus()
   }
 
   useImperativeHandle(outerRef, () => ({
@@ -100,41 +112,39 @@ export const MarkdownEditor = forwardRef<
   }))
 
   const apply = (tool: Tool) => {
-    const el = ref.current
-    if (!el) return
-    const start = el.selectionStart ?? value.length
-    const end = el.selectionEnd ?? value.length
-    const selected = value.slice(start, end)
-
-    let next = value
-    let selStart = start
-    let selEnd = end
+    const view = viewRef.current
+    if (!view) return
+    const { from, to } = view.state.selection.main
+    const doc = view.state.doc.toString()
 
     if (tool === 'heading' || tool === 'list') {
-      const lineStart = value.lastIndexOf('\n', start - 1) + 1
+      const line = view.state.doc.lineAt(from)
       const prefix = tool === 'heading' ? '## ' : '- '
-      next = value.slice(0, lineStart) + prefix + value.slice(lineStart)
-      selStart = start + prefix.length
-      selEnd = end + prefix.length
-    } else {
-      const [before, after, fallback] =
-        tool === 'bold' ? ['**', '**', '加粗文字'] : tool === 'code' ? ['`', '`', '代码'] : ['[', '](https://)', '链接文字']
-      const body = selected || fallback
-      next = value.slice(0, start) + before + body + after + value.slice(end)
-      selStart = start + before.length
-      selEnd = selStart + body.length
+      view.dispatch({
+        changes: { from: line.from, insert: prefix },
+        selection: { anchor: from + prefix.length, head: to + prefix.length },
+      })
+      view.focus()
+      return
     }
 
-    onChange(next)
-    lastSel.current = { start: selStart, end: selEnd }
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(selStart, selEnd)
+    const [before, after, fallback] =
+      tool === 'bold' ? ['**', '**', '加粗文字'] : tool === 'code' ? ['`', '`', '代码'] : ['[', '](https://)', '链接文字']
+    const body = doc.slice(from, to) || fallback
+    const snippet = `${before}${body}${after}`
+    view.dispatch({
+      changes: { from, to, insert: snippet },
+      selection: {
+        anchor: from + before.length,
+        head: from + before.length + body.length,
+      },
     })
+    view.focus()
   }
 
   const uploadImages = async (files: File[]) => {
-    if (!onUploadImage || files.length === 0) return
+    const upload = onUploadImageRef.current
+    if (!upload || files.length === 0) return
     setUploading(true)
     setErr('')
     try {
@@ -144,7 +154,7 @@ export const MarkdownEditor = forwardRef<
           setErr('只能插入图片')
           continue
         }
-        const img = await onUploadImage(file)
+        const img = await upload(file)
         const alt = (img.alt || '图片').replace(/[[\]]/g, '')
         snippets.push(`![${alt}](${img.url})`)
       }
@@ -155,6 +165,78 @@ export const MarkdownEditor = forwardRef<
       setUploading(false)
     }
   }
+  uploadImagesRef.current = (files) => {
+    if (!onUploadImageRef.current) {
+      setErr('先保存内容，再插入图片')
+      return
+    }
+    void uploadImages(files)
+  }
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const view = new EditorView({
+      state: EditorState.create({
+        doc: valueRef.current,
+        extensions: [
+          history(),
+          markdown(),
+          syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+          drawSelection(),
+          highlightActiveLine(),
+          EditorView.lineWrapping,
+          placeholderExt(placeholder),
+          keymap.of([...defaultKeymap, ...historyKeymap, indentWithTab]),
+          editorTheme,
+          EditorView.domEventHandlers({
+            paste: (event) => {
+              const files = Array.from(event.clipboardData?.files ?? []).filter((f) =>
+                f.type.startsWith('image/'),
+              )
+              if (files.length === 0) return false
+              event.preventDefault()
+              event.stopPropagation()
+              uploadImagesRef.current(files)
+              return true
+            },
+            drop: (event) => {
+              const files = Array.from(event.dataTransfer?.files ?? []).filter((f) =>
+                f.type.startsWith('image/'),
+              )
+              if (files.length === 0) return false
+              event.preventDefault()
+              uploadImagesRef.current(files)
+              return true
+            },
+          }),
+          EditorView.updateListener.of((update) => {
+            if (update.docChanged) onChangeRef.current(update.state.doc.toString())
+          }),
+        ],
+      }),
+      parent: host,
+    })
+    viewRef.current = view
+    return () => {
+      view.destroy()
+      viewRef.current = null
+    }
+  }, [placeholder])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const current = view.state.doc.toString()
+    if (current === value) return
+    view.dispatch({ changes: { from: 0, to: current.length, insert: value } })
+  }, [value])
+
+  useEffect(() => {
+    if (mobileTab === 'edit') {
+      requestAnimationFrame(() => viewRef.current?.requestMeasure())
+    }
+  }, [mobileTab])
 
   const tools: { key: Tool; icon: typeof Bold; label: string }[] = [
     { key: 'bold', icon: Bold, label: '加粗' },
@@ -235,7 +317,7 @@ export const MarkdownEditor = forwardRef<
         onChange={(e) => {
           const files = Array.from(e.target.files ?? [])
           e.target.value = ''
-          void uploadImages(files)
+          uploadImagesRef.current(files)
         }}
       />
 
@@ -244,46 +326,14 @@ export const MarkdownEditor = forwardRef<
       )}
 
       <div className="grid lg:grid-cols-2">
-        <textarea
-          ref={ref}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onSelect={rememberSelection}
-          onClick={rememberSelection}
-          onKeyUp={rememberSelection}
-          onPaste={(e) => {
-            const files = Array.from(e.clipboardData.files ?? []).filter((f) =>
-              f.type.startsWith('image/'),
-            )
-            if (files.length === 0) return
-            e.preventDefault()
-            if (!onUploadImage) {
-              setErr('先保存内容，再插入图片')
-              return
-            }
-            // 编辑器里粘图 = 直接插到正文；阻止冒泡避免外层附件区再传一份。
-            e.stopPropagation()
-            void uploadImages(files)
-          }}
-          onDrop={(e) => {
-            const files = Array.from(e.dataTransfer.files ?? []).filter((f) =>
-              f.type.startsWith('image/'),
-            )
-            if (files.length === 0) return
-            e.preventDefault()
-            if (!onUploadImage) {
-              setErr('先保存内容，再插入图片')
-              return
-            }
-            void uploadImages(files)
-          }}
-          placeholder={placeholder}
-          spellCheck={false}
+        <div
           className={cn(
-            'min-h-[360px] w-full resize-y bg-white p-3 font-mono text-[13px] leading-6 text-ink-900 outline-none placeholder:text-ink-300 lg:min-h-[520px]',
+            'content-editor min-w-0',
             mobileTab === 'preview' && 'hidden lg:block',
           )}
-        />
+        >
+          <div ref={hostRef} />
+        </div>
         <div
           className={cn(
             'min-h-[360px] overflow-y-auto border-t border-[var(--border)] p-3 lg:min-h-[520px] lg:border-l lg:border-t-0',

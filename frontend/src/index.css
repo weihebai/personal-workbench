@@ -150,6 +150,13 @@ body {
 /* ============================================================
    Markdown 正文
    ============================================================ */
+/* 内容库编辑器：桌面端与右侧预览保持同高 */
+@media (min-width: 1024px) {
+  .content-editor .cm-scroller {
+    min-height: 520px;
+  }
+}
+
 .markdown-body {
   color: var(--text);
   font-size: 14px;

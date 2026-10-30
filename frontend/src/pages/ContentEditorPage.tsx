@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileQuestion, Save, Trash2 } from 'lucide-react'
@@ -120,7 +120,17 @@ function EditorForm({
     clientId: initial?.clientId ? String(initial.clientId) : '',
   })
   const [err, setErr] = useState('')
-  const [saved, setSaved] = useState(false)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [dirty, setDirty] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(initial?.updatedAt ?? null)
+  const dirtyRef = useRef(false)
+  const savingRef = useRef(false)
+  const queuedRef = useRef(false)
+  const aliveRef = useRef(true)
+  const timerRef = useRef<number | null>(null)
+  const formRef = useRef(form)
+  formRef.current = form
+  const persistRef = useRef<() => Promise<boolean>>(async () => false)
 
   const { data: projects } = useQuery({
     queryKey: ['projects-lite'],
@@ -146,32 +156,132 @@ function EditorForm({
     qc.invalidateQueries({ queryKey: ['contents-stats'] })
   }
 
-  const save = useMutation({
-    mutationFn: async () => {
+  const persist = useCallback(async () => {
+    const snapshot = formRef.current
+    const title = snapshot.title.trim()
+    if (!title) {
+      if (!isNew) {
+        setSaveState('error')
+        setErr('标题不能为空')
+      }
+      return false
+    }
+    if (savingRef.current) {
+      queuedRef.current = true
+      return false
+    }
+    savingRef.current = true
+    setSaveState('saving')
+    setErr('')
+    try {
       const payload: ContentInput = {
-        title: form.title.trim(),
-        kind: form.kind,
-        status: form.status,
-        body: form.body,
-        tags: form.tags.replace(/，/g, ','),
-        projectId: form.projectId ? Number(form.projectId) : null,
-        clientId: form.clientId ? Number(form.clientId) : null,
+        title,
+        kind: snapshot.kind,
+        status: snapshot.status,
+        body: snapshot.body,
+        tags: snapshot.tags.replace(/，/g, ','),
+        projectId: snapshot.projectId ? Number(snapshot.projectId) : null,
+        clientId: snapshot.clientId ? Number(snapshot.clientId) : null,
       }
-      if (isNew) return (await api.post<Content>('/contents', payload)).data
-      return (await api.put<Content>(`/contents/${initial!.id}`, payload)).data
-    },
-    onSuccess: (c) => {
-      qc.setQueryData(['content', c.id], c)
-      invalidate()
+      const saved = isNew
+        ? (await api.post<Content>('/contents', payload)).data
+        : (await api.put<Content>(`/contents/${initial!.id}`, payload)).data
+      if (!aliveRef.current) return true
+      qc.setQueryData(['content', saved.id], saved)
+      qc.invalidateQueries({ queryKey: ['contents'] })
+      qc.invalidateQueries({ queryKey: ['contents-stats'] })
+      dirtyRef.current = false
+      setDirty(false)
+      setSaveState('saved')
+      setLastSavedAt(saved.updatedAt)
       if (isNew) {
-        navigate(`/contents/${c.id}`, { replace: true })
-        return
+        queuedRef.current = false
+        navigate(`/contents/${saved.id}`, { replace: true })
       }
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
-    },
-    onError: (e) => setErr(errMsg(e)),
-  })
+      return true
+    } catch (e) {
+      if (!aliveRef.current) return false
+      setSaveState('error')
+      setErr(errMsg(e))
+      return false
+    } finally {
+      savingRef.current = false
+      if (queuedRef.current && aliveRef.current) {
+        queuedRef.current = false
+        void persistRef.current()
+      }
+    }
+  }, [isNew, initial, navigate, qc])
+  persistRef.current = persist
+
+  const updateForm = (patch: Partial<FormState>) => {
+    dirtyRef.current = true
+    setDirty(true)
+    setSaveState('idle')
+    setForm((f) => ({ ...f, ...patch }))
+  }
+
+  useEffect(() => {
+    aliveRef.current = true
+    return () => {
+      aliveRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!dirtyRef.current || !form.title.trim()) return
+    if (timerRef.current) window.clearTimeout(timerRef.current)
+    timerRef.current = window.setTimeout(() => {
+      void persistRef.current()
+    }, 800)
+    return () => {
+      if (timerRef.current) {
+        window.clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+  }, [form])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (timerRef.current) {
+          window.clearTimeout(timerRef.current)
+          timerRef.current = null
+        }
+        void persistRef.current()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!dirtyRef.current && !savingRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+    }
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => window.removeEventListener('beforeunload', onBeforeUnload)
+  }, [])
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (!dirtyRef.current && !savingRef.current) return
+      const link = (e.target as Element | null)?.closest('a[href]')
+      if (!link) return
+      const href = link.getAttribute('href') ?? ''
+      if (!href || href.startsWith('#') || /^https?:/i.test(href)) return
+      if (!window.confirm('还有改动没保存，确定离开？')) {
+        e.preventDefault()
+        e.stopPropagation()
+      }
+    }
+    document.addEventListener('click', onClick, true)
+    return () => document.removeEventListener('click', onClick, true)
+  }, [])
 
   const del = useMutation({
     mutationFn: async () => api.delete(`/contents/${initial!.id}`),
@@ -200,22 +310,40 @@ function EditorForm({
     .filter(Boolean)
 
   const submit = () => {
-    setErr('')
-    if (!form.title.trim()) {
+    if (!formRef.current.title.trim()) {
+      setSaveState('error')
       setErr('标题不能为空')
       return
     }
-    save.mutate()
+    if (timerRef.current) {
+      window.clearTimeout(timerRef.current)
+      timerRef.current = null
+    }
+    void persistRef.current()
+  }
+
+  const leave = () => {
+    if (dirtyRef.current || savingRef.current) {
+      if (!window.confirm('还有改动没保存，确定离开？')) return
+    }
+    onBack()
   }
 
   return (
     <div>
       <PageHeader
         title={isNew ? '新建内容' : '编辑内容'}
-        desc={isNew ? '先写下来，之后可以继续打磨或生成分享链接' : `最后更新 ${fmtDate(initial!.updatedAt)}`}
+        desc={
+          isNew
+            ? '写下来会自动保存，之后可以继续打磨或生成分享链接'
+            : `最后更新 ${fmtDate(lastSavedAt ?? initial!.updatedAt)}`
+        }
         actions={
           <>
-            {saved && <span className="text-xs font-medium text-emerald-600">已保存</span>}
+            {saveState === 'saving' && <span className="text-xs text-ink-400">保存中…</span>}
+            {saveState === 'saved' && <span className="text-xs font-medium text-emerald-600">已保存</span>}
+            {saveState === 'error' && <span className="text-xs font-medium text-red-600">保存失败</span>}
+            {saveState === 'idle' && dirty && <span className="text-xs text-ink-400">未保存</span>}
             {!isNew && (
               <Button
                 size="sm"
@@ -229,10 +357,10 @@ function EditorForm({
                 <Trash2 size={13} /> 删除
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={onBack}>
+            <Button size="sm" variant="outline" onClick={leave}>
               返回
             </Button>
-            <Button size="sm" loading={save.isPending} onClick={submit}>
+            <Button size="sm" loading={saveState === 'saving'} onClick={submit}>
               <Save size={13} /> 保存
             </Button>
           </>
@@ -250,7 +378,7 @@ function EditorForm({
           <Card className="space-y-2">
             <input
               value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+              onChange={(e) => updateForm({ title: e.target.value })}
               placeholder="标题"
               autoFocus={isNew}
               className="w-full bg-transparent text-lg font-bold tracking-tight text-ink-900 outline-none placeholder:text-ink-300"
@@ -262,7 +390,7 @@ function EditorForm({
                   <button
                     key={k}
                     type="button"
-                    onClick={() => setForm((f) => ({ ...f, kind: k }))}
+                    onClick={() => updateForm({ kind: k })}
                     className={cn(
                       'rounded-md border px-2 py-1 text-[11px] font-medium transition-colors',
                       form.kind === k
@@ -280,7 +408,7 @@ function EditorForm({
           <MarkdownEditor
             ref={editorRef}
             value={form.body}
-            onChange={(v) => setForm((f) => ({ ...f, body: v }))}
+            onChange={(v) => updateForm({ body: v })}
             onUploadImage={isNew ? undefined : uploadInlineImage}
           />
 
@@ -312,7 +440,7 @@ function EditorForm({
             <Field label="状态">
               <Select
                 value={form.status}
-                onChange={(v) => setForm((f) => ({ ...f, status: v as ContentStatus }))}
+                onChange={(v) => updateForm({ status: v as ContentStatus })}
                 options={STATUS_OPTS}
               />
             </Field>
@@ -320,7 +448,7 @@ function EditorForm({
             <Field label="标签" hint="逗号分隔，最多 10 个">
               <Input
                 value={form.tags}
-                onChange={(e) => setForm((f) => ({ ...f, tags: e.target.value }))}
+                onChange={(e) => updateForm({ tags: e.target.value })}
                 placeholder="微信小程序,备案"
               />
               {previewTags.length > 0 && (
@@ -337,7 +465,7 @@ function EditorForm({
             <Field label="关联项目">
               <Select
                 value={form.projectId}
-                onChange={(v) => setForm((f) => ({ ...f, projectId: v }))}
+                onChange={(v) => updateForm({ projectId: v })}
                 options={projectOpts}
               />
             </Field>
@@ -345,7 +473,7 @@ function EditorForm({
             <Field label="关联客户">
               <Select
                 value={form.clientId}
-                onChange={(v) => setForm((f) => ({ ...f, clientId: v }))}
+                onChange={(v) => updateForm({ clientId: v })}
                 options={clientOpts}
               />
             </Field>
