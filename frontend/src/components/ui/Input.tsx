@@ -40,6 +40,7 @@ export function Field({
   hint,
   error,
   required,
+  action,
   children,
   className,
 }: {
@@ -47,16 +48,23 @@ export function Field({
   hint?: string
   error?: string
   required?: boolean
+  /** 标签右侧的操作区，如语音输入按钮 */
+  action?: React.ReactNode
   children: React.ReactNode
   className?: string
 }) {
   return (
     <div className={cn('flex flex-col gap-1.5', className)}>
-      {label && (
-        <label className="text-xs font-medium text-ink-500">
-          {label}
-          {required && <span className="ml-0.5 text-red-500">*</span>}
-        </label>
+      {(label || action) && (
+        <div className="flex min-h-5 items-center justify-between gap-2">
+          {label && (
+            <label className="text-xs font-medium text-ink-500">
+              {label}
+              {required && <span className="ml-0.5 text-red-500">*</span>}
+            </label>
+          )}
+          {action}
+        </div>
       )}
       {children}
       {error ? (

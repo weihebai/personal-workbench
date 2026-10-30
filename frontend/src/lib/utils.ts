@@ -79,6 +79,7 @@ export const TASK_STATUS = {
   review: { label: '待验收', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
   done: { label: '已完成', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
   canceled: { label: '已取消', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-400 border-ink-200' },
+  archived: { label: '已归档', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-400 border-ink-200' },
 } as const
 
 export const TASK_PRIORITY = {
@@ -86,6 +87,13 @@ export const TASK_PRIORITY = {
   normal: { label: '普通', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
   high: { label: '高', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700 border-amber-200' },
   urgent: { label: '紧急', color: 'bg-red-500', soft: 'bg-red-50 text-red-700 border-red-200' },
+} as const
+
+export const TICKET_STATUS = {
+  pending: { label: '待处理', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700 border-amber-200' },
+  doing: { label: '处理中', color: 'bg-brand-500', soft: 'bg-brand-50 text-brand-700 border-brand-200' },
+  waiting: { label: '待客户确认', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
+  closed: { label: '已关闭', color: 'bg-emerald-500', soft: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
 } as const
 
 export const PAYMENT_STATUS = {
@@ -116,6 +124,12 @@ export const COMMISSION_TYPE = {
   none: { label: '不抽成', color: 'bg-ink-400', soft: 'bg-ink-50 text-ink-600 border-ink-200' },
   pct: { label: '按比例', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700 border-amber-200' },
   fixed: { label: '固定金额', color: 'bg-violet-500', soft: 'bg-violet-50 text-violet-700 border-violet-200' },
+} as const
+
+/** 项目计费方式 */
+export const BILLING_MODE = {
+  fixed: { label: '固定总价', color: 'bg-ink-400', soft: 'bg-ink-50 text-ink-600 border-ink-200' },
+  hourly: { label: '按工时', color: 'bg-cyan-500', soft: 'bg-cyan-50 text-cyan-700 border-cyan-200' },
 } as const
 
 /** 灵感记录：消化状态 */

@@ -88,6 +88,18 @@ func main() {
 		if strings.HasPrefix(pth, "/share/") {
 			pth = "/share/[redacted]"
 		}
+		if strings.HasPrefix(pth, "/api/public/feedback/") {
+			pth = "/api/public/feedback/[redacted]"
+		}
+		if strings.HasPrefix(pth, "/api/public/tickets/") {
+			pth = "/api/public/tickets/[redacted]"
+		}
+		if strings.HasPrefix(pth, "/feedback/") {
+			pth = "/feedback/[redacted]"
+		}
+		if strings.HasPrefix(pth, "/t/") {
+			pth = "/t/[redacted]"
+		}
 		return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %s\n",
 			p.TimeStamp.Format("2006/01/02 - 15:04:05"),
 			p.StatusCode, p.Latency, p.ClientIP, p.Method, pth)
@@ -123,6 +135,15 @@ func main() {
 		// 安全性靠 256 位随机 Token，且所有失败统一 404。
 		api.GET("/public/contents/:token", h.GetPublicContent)
 
+		// 客户提报页与工单进度页：客户没有账号，走独立的 256 位 Token。
+		// 项目 Token 只能提交工单，工单 Token 只能看自己那一张，两者不能混用。
+		api.GET("/public/feedback/:token", h.GetPublicFeedback)
+		api.POST("/public/feedback/:token/tickets", h.SubmitPublicTicket)
+		api.GET("/public/tickets/:token", h.GetPublicTicket)
+		api.POST("/public/tickets/:token/messages", h.PostPublicTicketMessage)
+		api.POST("/public/tickets/:token/confirm", h.ConfirmPublicTicket)
+		api.POST("/public/tickets/:token/attachments", h.UploadPublicTicketAttachment)
+
 		authed := api.Group("")
 		authed.Use(mgr.Middleware(ah.TokenValid))
 		{
@@ -138,6 +159,12 @@ func main() {
 			authed.GET("/projects/:id", h.GetProject)
 			authed.PUT("/projects/:id", h.UpdateProject)
 			authed.DELETE("/projects/:id", h.DeleteProject)
+
+			// 工时记录（按工时计费的项目）
+			authed.GET("/projects/:id/worklogs", h.ListWorkLogs)
+			authed.POST("/projects/:id/worklogs", h.CreateWorkLog)
+			authed.PUT("/worklogs/:id", h.UpdateWorkLog)
+			authed.DELETE("/worklogs/:id", h.DeleteWorkLog)
 
 			authed.GET("/clients", h.ListClients)
 			authed.POST("/clients", h.CreateClient)
@@ -224,6 +251,18 @@ func main() {
 			authed.POST("/contents/:id/share", h.ShareContent)
 			authed.POST("/contents/:id/share/rotate", h.RotateContentShare)
 			authed.DELETE("/contents/:id/share", h.RevokeContentShare)
+
+			// 工单（客户反馈）：内部看板、录入、推进、结案
+			authed.GET("/tickets", h.ListTickets)
+			authed.POST("/tickets", h.CreateTicket)
+			authed.GET("/tickets/:id", h.GetTicket)
+			authed.PUT("/tickets/:id", h.UpdateTicket)
+			authed.DELETE("/tickets/:id", h.DeleteTicket)
+
+			// 项目级客户提报链接：只能提报，不能查看已有工单
+			authed.POST("/projects/:id/feedback-token", h.CreateProjectFeedbackToken)
+			authed.POST("/projects/:id/feedback-token/rotate", h.RotateProjectFeedbackToken)
+			authed.DELETE("/projects/:id/feedback-token", h.RevokeProjectFeedbackToken)
 		}
 	}
 
@@ -257,7 +296,9 @@ func main() {
 		r.Static("/assets", filepath.Join(root, "assets"))
 		r.NoRoute(func(c *gin.Context) {
 			// 公开分享页是 SPA 路由，也要带上不收索引 / 不传 Referer 的头
-			if strings.HasPrefix(c.Request.URL.Path, "/share/") {
+			if strings.HasPrefix(c.Request.URL.Path, "/share/") ||
+				strings.HasPrefix(c.Request.URL.Path, "/feedback/") ||
+				strings.HasPrefix(c.Request.URL.Path, "/t/") {
 				c.Header("X-Robots-Tag", "noindex, nofollow, noarchive")
 				c.Header("Referrer-Policy", "no-referrer")
 			}

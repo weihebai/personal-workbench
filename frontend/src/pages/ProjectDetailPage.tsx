@@ -15,6 +15,7 @@ import {
   CheckCircle2,
   Clock,
   BellRing,
+  Ticket,
 } from 'lucide-react'
 import {
   api,
@@ -25,6 +26,7 @@ import {
   type Project,
   type Reminder,
   type Task,
+  type WorkLog,
 } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Badge, Card, Skeleton, Dialog } from '@/components/ui/Layout'
@@ -43,6 +45,7 @@ import {
 import { ProjectFormDialog } from './ProjectFormDialog'
 import { PaymentFormDialog } from './PaymentFormDialog'
 import { MilestoneFormDialog } from './MilestoneFormDialog'
+import { WorkLogFormDialog } from './WorkLogFormDialog'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { GitBranch as GitBranchIcon } from 'lucide-react'
 
@@ -53,6 +56,7 @@ interface Detail {
   client: Client | null
   reminders: Reminder[]
   milestones: Milestone[]
+  workLogs: WorkLog[]
 }
 
 export default function ProjectDetailPage() {
@@ -70,6 +74,7 @@ export default function ProjectDetailPage() {
   const [payConfirm, setPayConfirm] = useState(false)
   // undefined=关闭, null=新建, 对象=编辑
   const [msDialog, setMsDialog] = useState<Milestone | null | undefined>(undefined)
+  const [logDialog, setLogDialog] = useState<WorkLog | null | undefined>(undefined)
 
   const { data, isLoading } = useQuery({
     queryKey: ['project', id],
@@ -87,6 +92,25 @@ export default function ProjectDetailPage() {
 
   const delPay = useMutation({
     mutationFn: async (pid: number) => api.delete(`/payments/${pid}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['project', id] })
+      qc.invalidateQueries({ queryKey: ['projects'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+    },
+  })
+
+  // 客户提报链接：生成 / 换新 / 撤销
+  const feedback = useMutation({
+    mutationFn: async (action: 'create' | 'rotate' | 'revoke') => {
+      if (action === 'create') return (await api.post(`/projects/${id}/feedback-token`)).data
+      if (action === 'rotate') return (await api.post(`/projects/${id}/feedback-token/rotate`)).data
+      return (await api.delete(`/projects/${id}/feedback-token`)).data
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['project', id] }),
+  })
+
+  const delLog = useMutation({
+    mutationFn: async (lid: number) => api.delete(`/worklogs/${lid}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['project', id] })
       qc.invalidateQueries({ queryKey: ['projects'] })
@@ -126,6 +150,10 @@ export default function ProjectDetailPage() {
   // 走中介的项目：客户把钱付给中介，交付验收后中介一次性结给我。
   // 这种没有「首款/尾款」的概念，收款引导要跟直客项目区分开。
   const isBroker = (p.commission ?? 0) > 0
+  const isHourly = p.billingMode === 'hourly'
+  // 公司项目不走自己的收款流程，财务和收款相关区块都不展示
+  const isCompany = p.kind === 'company'
+  const workMinutes = (data.workLogs ?? []).reduce((s, l) => s + l.minutes, 0)
 
   return (
     <div className="space-y-3">
@@ -166,39 +194,54 @@ export default function ProjectDetailPage() {
         {p.summary && <p className="mt-2 text-xs leading-relaxed text-ink-500">{p.summary}</p>}
 
         {/* 财务 */}
-        <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Metric label="合同金额" value={money(p.quote)} />
-          <Metric label="已收" value={money(p.received)} tone="emerald" />
-          <Metric label="待收" value={money(remain > 0 ? remain : 0)} tone="amber" />
-          {/* 毛利按净额算：成本是为拿下净额花的，拿含抽成的合同额去减会把抽成算成利润 */}
-          <Metric
-            label="成本 / 毛利"
-            value={`${money(p.cost, false)} / ${money((p.netQuote ?? p.quote) - p.cost, false)}`}
-          />
-        </div>
+        {!isCompany && (
+          <>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <Metric label={isHourly ? '应结金额' : '合同金额'} value={money(p.quote)} />
+              <Metric label="已收" value={money(p.received)} tone="emerald" />
+              <Metric label="待收" value={money(remain > 0 ? remain : 0)} tone="amber" />
+              {/* 毛利按净额算：成本是为拿下净额花的，拿含抽成的合同额去减会把抽成算成利润 */}
+              <Metric
+                label="成本 / 毛利"
+                value={`${money(p.cost, false)} / ${money((p.netQuote ?? p.quote) - p.cost, false)}`}
+              />
+            </div>
 
-        {/* 中介抽成 */}
-        {p.commissionType !== 'none' && p.commission > 0 && (
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-[11px]">
-            <span className="font-semibold text-amber-800">
-              中介抽成{' '}
-              {p.commissionType === 'pct' ? `${p.commissionRate}%` : money(p.commissionRate)}
-            </span>
-            <span className="text-ink-500">
-              抽走 <b className="tabular text-amber-700">-{money(p.commission)}</b>
-            </span>
-            <span className="text-ink-500">
-              你到手 <b className="tabular text-emerald-600">{money(p.netQuote)}</b>
-            </span>
-            {p.broker && <span className="text-ink-400">渠道：{p.broker}</span>}
-          </div>
+            {isHourly && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-cyan-200 bg-cyan-50/60 px-2.5 py-1.5 text-[11px] text-cyan-800">
+                <span className="font-semibold">按工时计费</span>
+                <span>时薪 {money(p.hourlyRate)}/小时</span>
+                <span>
+                  累计 <b className="tabular">{minutesToHours(workMinutes)}</b> · 应结{' '}
+                  <b className="tabular">{money(p.quote)}</b>
+                </span>
+              </div>
+            )}
+
+            {/* 中介抽成 */}
+            {p.commissionType !== 'none' && p.commission > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-amber-200 bg-amber-50/60 px-2.5 py-1.5 text-[11px]">
+                <span className="font-semibold text-amber-800">
+                  中介抽成{' '}
+                  {p.commissionType === 'pct' ? `${p.commissionRate}%` : money(p.commissionRate)}
+                </span>
+                <span className="text-ink-500">
+                  抽走 <b className="tabular text-amber-700">-{money(p.commission)}</b>
+                </span>
+                <span className="text-ink-500">
+                  你到手 <b className="tabular text-emerald-600">{money(p.netQuote)}</b>
+                </span>
+                {p.broker && <span className="text-ink-400">渠道：{p.broker}</span>}
+              </div>
+            )}
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-100">
+              <div
+                className={cn('h-full rounded-full', pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500')}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </>
         )}
-        <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-100">
-          <div
-            className={cn('h-full rounded-full', pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500')}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
 
         <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 border-t border-[var(--border)] pt-2.5 text-[11px]">
           {p.sourcePath && <AssetItem icon={<FolderOpen size={12} />} label="源码" value={p.sourcePath} />}
@@ -208,6 +251,58 @@ export default function ProjectDetailPage() {
           )}
           {p.gitRepo && <AssetItem icon={<GitBranch size={12} />} label="仓库" value={p.gitRepo} href={p.gitRepo} />}
           {p.deployAt && <AssetItem icon={<Server size={12} />} label="部署" value={p.deployAt} />}
+        </div>
+
+        {/* 客户提报链接：客户免登录提交问题，只能提报，看不到任何已有工单 */}
+        <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-2.5 text-[11px]">
+          <span className="flex items-center gap-1 text-ink-500">
+            <Ticket size={12} /> 客户提报
+          </span>
+          {p.feedbackToken ? (
+            <>
+              <span className="min-w-0 flex-1 truncate text-ink-400">
+                {window.location.origin + '/feedback/' + p.feedbackToken}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  navigator.clipboard?.writeText(window.location.origin + '/feedback/' + p.feedbackToken)
+                }
+              >
+                复制
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={feedback.isPending}
+                onClick={() => {
+                  if (confirm('换新后旧链接立即失效，已经发给客户的链接会打不开。确定？')) {
+                    feedback.mutate('rotate')
+                  }
+                }}
+              >
+                换新
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                loading={feedback.isPending}
+                onClick={() => {
+                  if (confirm('撤销后客户手上的链接立即失效，确定？')) feedback.mutate('revoke')
+                }}
+              >
+                撤销
+              </Button>
+            </>
+          ) : (
+            <>
+              <span className="text-ink-400">还没生成</span>
+              <Button size="sm" variant="outline" loading={feedback.isPending} onClick={() => feedback.mutate('create')}>
+                生成链接
+              </Button>
+            </>
+          )}
         </div>
 
         <div className="mt-2 flex flex-wrap gap-4 text-[11px] text-ink-400">
@@ -223,107 +318,179 @@ export default function ProjectDetailPage() {
         </div>
       </Card>
 
-      {/* 收款 */}
-      <Card padding={false}>
-        <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
-          <h3 className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
-            <Wallet size={13} className="text-emerald-600" /> 收款记录
-            <span className="text-[10px] font-normal text-ink-400">({data.payments.length})</span>
-          </h3>
-          {isBroker && data.payments.length === 0 ? (
-            // 空态里已经有「记中介结款」的主按钮，这里不再重复
-            <span className="text-[10px] text-ink-400">走中介</span>
-          ) : (
-            <Button size="sm" variant="outline" onClick={() => setPayDialog(null)}>
-              <Plus size={13} /> 添加
-            </Button>
-          )}
-        </div>
+      {/* 收款：公司项目不走这里 */}
+      {!isCompany && (
+        <Card padding={false}>
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
+              <Wallet size={13} className="text-emerald-600" /> 收款记录
+              <span className="text-[10px] font-normal text-ink-400">({data.payments.length})</span>
+            </h3>
+            {isBroker && data.payments.length === 0 ? (
+              // 空态里已经有「记中介结款」的主按钮，这里不再重复
+              <span className="text-[10px] text-ink-400">走中介</span>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => setPayDialog(null)}>
+                <Plus size={13} /> 添加
+              </Button>
+            )}
+          </div>
 
-        {data.payments.length === 0 ? (
-          isBroker ? (
-            <BrokerEmptyState
-              net={remain}
-              broker={p.broker}
-              onAdd={() => setPayQuick(true)}
-              onInstant={() => setPayInstant(true)}
-              onDivide={() => setPayDialog(null)}
-            />
+          {data.payments.length === 0 ? (
+            isBroker ? (
+              <BrokerEmptyState
+                net={remain}
+                broker={p.broker}
+                onAdd={() => setPayQuick(true)}
+                onInstant={() => setPayInstant(true)}
+                onDivide={() => setPayDialog(null)}
+              />
+            ) : (
+              <ConfirmPayEmptyState
+                net={remain}
+                onConfirm={() => setPayConfirm(true)}
+                onManual={() => setPayDialog(null)}
+              />
+            )
           ) : (
-            <ConfirmPayEmptyState
-              net={remain}
-              onConfirm={() => setPayConfirm(true)}
-              onManual={() => setPayDialog(null)}
-            />
-          )
-        ) : (
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-ink-400">
-                <th className="px-3 py-1.5 font-medium">款项</th>
-                <th className="px-2 py-1.5 font-medium">金额</th>
-                <th className="px-2 py-1.5 font-medium">到期日</th>
-                <th className="px-2 py-1.5 font-medium">到账日</th>
-                <th className="px-2 py-1.5 font-medium">状态</th>
-                <th className="px-2 py-1.5" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.payments.map((pay) => {
-                const ps = dictOf(PAYMENT_STATUS, pay.status)
-                return (
-                  <tr key={pay.id} className="border-b border-[var(--border)] last:border-0 hover:bg-ink-50/60">
-                    <td className="px-3 py-1.5 font-medium text-ink-900">{pay.title || '—'}</td>
-                    <td className="tabular px-2 py-1.5 font-semibold text-ink-900">{money(pay.amount)}</td>
-                    <td className="tabular px-2 py-1.5 text-ink-500">
-                      {pay.planDate ? (
-                        fmtDate(pay.planDate)
-                      ) : pay.dueDate ? (
-                        <span className="text-ink-400">账期至 {fmtDate(pay.dueDate)}</span>
-                      ) : (
-                        '—'
-                      )}
-                      {pay.overdue && (
-                        <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
-                          逾期 {pay.daysLate} 天
-                        </span>
-                      )}
-                    </td>
-                    <td className="tabular px-2 py-1.5 text-ink-500">{fmtDate(pay.paidDate)}</td>
-                    <td className="px-2 py-1.5">
-                      <Badge soft={ps.soft} dot={ps.color}>
-                        {ps.label}
-                      </Badge>
-                    </td>
-                    <td className="px-2 py-1.5 text-right">
-                      {pay.status !== 'received' && (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-ink-400">
+                  <th className="px-3 py-1.5 font-medium">款项</th>
+                  <th className="px-2 py-1.5 font-medium">金额</th>
+                  <th className="px-2 py-1.5 font-medium">到期日</th>
+                  <th className="px-2 py-1.5 font-medium">到账日</th>
+                  <th className="px-2 py-1.5 font-medium">状态</th>
+                  <th className="px-2 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.payments.map((pay) => {
+                  const ps = dictOf(PAYMENT_STATUS, pay.status)
+                  return (
+                    <tr key={pay.id} className="border-b border-[var(--border)] last:border-0 hover:bg-ink-50/60">
+                      <td className="px-3 py-1.5 font-medium text-ink-900">{pay.title || '—'}</td>
+                      <td className="tabular px-2 py-1.5 font-semibold text-ink-900">{money(pay.amount)}</td>
+                      <td className="tabular px-2 py-1.5 text-ink-500">
+                        {pay.planDate ? (
+                          fmtDate(pay.planDate)
+                        ) : pay.dueDate ? (
+                          <span className="text-ink-400">账期至 {fmtDate(pay.dueDate)}</span>
+                        ) : (
+                          '—'
+                        )}
+                        {pay.overdue && (
+                          <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-medium text-red-600">
+                            逾期 {pay.daysLate} 天
+                          </span>
+                        )}
+                      </td>
+                      <td className="tabular px-2 py-1.5 text-ink-500">{fmtDate(pay.paidDate)}</td>
+                      <td className="px-2 py-1.5">
+                        <Badge soft={ps.soft} dot={ps.color}>
+                          {ps.label}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-1.5 text-right">
+                        {pay.status !== 'received' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="标记到账"
+                            onClick={() => markReceived.mutate(pay)}
+                          >
+                            <CheckCircle2 size={13} className="text-emerald-500" />
+                          </Button>
+                        )}
+                        <Button variant="ghost" size="icon" onClick={() => setPayDialog(pay)}>
+                          <Pencil size={12} />
+                        </Button>
                         <Button
                           variant="ghost"
                           size="icon"
-                          title="标记到账"
-                          onClick={() => markReceived.mutate(pay)}
+                          onClick={() => confirm('删除这笔收款？') && delPay.mutate(pay.id)}
                         >
-                          <CheckCircle2 size={13} className="text-emerald-500" />
+                          <Trash2 size={12} className="text-red-400" />
                         </Button>
-                      )}
-                      <Button variant="ghost" size="icon" onClick={() => setPayDialog(pay)}>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
+
+      {/* 工时记录：按工时计费的项目才有 */}
+      {isHourly && (
+        <Card padding={false}>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
+            <h3 className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
+              <Clock size={13} className="text-cyan-600" /> 工时记录
+              <span className="text-[10px] font-normal text-ink-400">({data.workLogs.length})</span>
+            </h3>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-ink-400">
+                累计 {minutesToHours(workMinutes)}
+                {!isCompany && ` · 应结 ${money(p.quote)}`}
+              </span>
+              <Button size="sm" variant="outline" onClick={() => setLogDialog(null)}>
+                <Plus size={13} /> 记录工时
+              </Button>
+            </div>
+          </div>
+
+          {data.workLogs.length === 0 ? (
+            <div className="px-3 py-5 text-center">
+              <p className="text-xs text-ink-400">还没有工时记录</p>
+              <p className="mt-1 text-[11px] text-ink-400">
+                每次干完活记一条{!isCompany && '，累计工时 × 时薪就是应结金额'}
+              </p>
+            </div>
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-ink-400">
+                  <th className="px-3 py-1.5 font-medium">日期</th>
+                  <th className="px-2 py-1.5 font-medium">工时</th>
+                  <th className="px-2 py-1.5 font-medium">工作内容</th>
+                  {!isCompany && <th className="px-2 py-1.5 font-medium">金额</th>}
+                  <th className="px-2 py-1.5" />
+                </tr>
+              </thead>
+              <tbody>
+                {data.workLogs.map((l) => (
+                  <tr key={l.id} className="border-b border-[var(--border)] last:border-0 hover:bg-ink-50/60">
+                    <td className="tabular whitespace-nowrap px-3 py-1.5 text-ink-500">{fmtDate(l.workDate)}</td>
+                    <td className="tabular whitespace-nowrap px-2 py-1.5 font-semibold text-ink-900">
+                      {minutesToHours(l.minutes)}
+                    </td>
+                    <td className="whitespace-pre-wrap px-2 py-1.5 text-ink-600">{l.content}</td>
+                    {!isCompany && (
+                      <td className="tabular whitespace-nowrap px-2 py-1.5 text-ink-700">
+                        {money((l.minutes / 60) * p.hourlyRate)}
+                      </td>
+                    )}
+                    <td className="whitespace-nowrap px-2 py-1.5 text-right">
+                      <Button variant="ghost" size="icon" onClick={() => setLogDialog(l)}>
                         <Pencil size={12} />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon"
-                        onClick={() => confirm('删除这笔收款？') && delPay.mutate(pay.id)}
+                        onClick={() => confirm('删除这条工时记录？') && delLog.mutate(l.id)}
                       >
                         <Trash2 size={12} className="text-red-400" />
                       </Button>
                     </td>
                   </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        )}
-      </Card>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </Card>
+      )}
 
       {/* 任务 + 提醒 */}
       <div className="grid gap-3 lg:grid-cols-2">
@@ -457,6 +624,14 @@ export default function ProjectDetailPage() {
           milestone={msDialog}
           projectId={p.id}
           onClose={() => setMsDialog(undefined)}
+        />
+      )}
+      {logDialog !== undefined && (
+        <WorkLogFormDialog
+          projectId={p.id}
+          log={logDialog}
+          hourlyRate={p.hourlyRate}
+          onClose={() => setLogDialog(undefined)}
         />
       )}
     </div>

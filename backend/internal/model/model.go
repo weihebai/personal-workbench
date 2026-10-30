@@ -62,17 +62,21 @@ type Project struct {
 	TechStack  string `gorm:"size:255" json:"techStack"`
 
 	// 财务
-	ClientID  *uint   `gorm:"index" json:"clientId"`
-	Quote     float64 `json:"quote"` // 合同/报价总额（客户付的全款）
-	Cost      float64 `json:"cost"`  // 成本（服务器/第三方等）
+	ClientID *uint   `gorm:"index" json:"clientId"`
+	Quote    float64 `json:"quote"` // 合同/报价总额（客户付的全款）；按工时计费时由工时记录自动算出
+	Cost     float64 `json:"cost"`  // 成本（服务器/第三方等）
+	// 计费方式：fixed 固定总价 / hourly 按工时。
+	// hourly 时 Quote 不再手填，由「累计工时 × 时薪」自动生成。
+	BillingMode string  `gorm:"size:16;index" json:"billingMode"`
+	HourlyRate  float64 `json:"hourlyRate"` // 时薪（元/小时）
 	// 中介抽成：CommissionType=pct 时 CommissionRate 是百分比（20 = 抽 20%），
 	// CommissionType=fixed 时 CommissionRate 是固定金额。
 	// 抽成从合同额里扣，记录收款时填实际到账（扣完抽成的钱）。
-	CommissionType string  `gorm:"size:16" json:"commissionType"` // none 无 / pct 按比例 / fixed 固定金额
-	CommissionRate float64 `json:"commissionRate"`
-	Broker         string  `gorm:"size:128" json:"broker"` // 中介/渠道名，如「XX接单群」
-	StartDate *time.Time `json:"startDate"`
-	DueDate   *time.Time `json:"dueDate"`
+	CommissionType string     `gorm:"size:16" json:"commissionType"` // none 无 / pct 按比例 / fixed 固定金额
+	CommissionRate float64    `json:"commissionRate"`
+	Broker         string     `gorm:"size:128" json:"broker"` // 中介/渠道名，如「XX接单群」
+	StartDate      *time.Time `json:"startDate"`
+	DueDate        *time.Time `json:"dueDate"`
 
 	// 工时（分钟）
 	EstimateMinutes int `json:"estimateMinutes"`
@@ -80,9 +84,13 @@ type Project struct {
 
 	Note string `gorm:"type:text" json:"note"`
 
+	// 客户提报链接：只用于提交工单，看不到任何已有工单
+	FeedbackToken *string `gorm:"size:64;uniqueIndex" json:"feedbackToken,omitempty"`
+
 	// 只读聚合字段（查询时填充，不落库）
 	Received float64  `gorm:"-" json:"received"`
 	TagList  []string `gorm:"-" json:"tags"`
+	FeedbackPath string `gorm:"-" json:"feedbackPath,omitempty"`
 
 	// 抽成与净收入（只读，由 Quote/CommissionType/CommissionRate 推算）
 	Commission float64 `gorm:"-" json:"commission"` // 抽成金额
@@ -93,6 +101,16 @@ type Project struct {
 	MilestoneDone  int    `gorm:"-" json:"milestoneDone"`
 	NextMilestone  string `gorm:"-" json:"nextMilestone"`
 	NextDueIn      *int   `gorm:"-" json:"nextDueIn"`
+}
+
+// 工时记录：按工时计费的项目逐次记录干了多久、做了什么。
+// 累计分钟数会回写项目的实际工时，按工时计费的项目再用它乘时薪得出应结金额。
+type WorkLog struct {
+	Base
+	ProjectID uint      `gorm:"index;not null" json:"projectId"`
+	WorkDate  time.Time `gorm:"index" json:"workDate"`
+	Minutes   int       `json:"minutes"`
+	Content   string    `gorm:"type:text" json:"content"`
 }
 
 // 收款节点。
@@ -127,7 +145,7 @@ type Task struct {
 	ProjectID *uint `gorm:"index" json:"projectId"`
 	ClientID  *uint `gorm:"index" json:"clientId"`
 
-	Status   string `gorm:"size:16;index" json:"status"`   // todo 待办 / doing 进行中 / review 待验收 / done 已完成 / canceled 已取消
+	Status   string `gorm:"size:16;index" json:"status"`   // todo 待办 / doing 进行中 / review 待验收 / done 已完成 / canceled 已取消 / archived 已归档
 	Priority string `gorm:"size:16;index" json:"priority"` // low 低 / normal 普通 / high 高 / urgent 紧急
 	Kind     string `gorm:"size:16;index" json:"kind"`     // company 公司 / personal 个人 / freelance 私活
 
@@ -143,6 +161,8 @@ type Task struct {
 	Subtasks      []Subtask `gorm:"-" json:"subtasks,omitempty"`
 	SubtaskDone   int       `gorm:"-" json:"subtaskDone"`
 	SubtaskTotal  int       `gorm:"-" json:"subtaskTotal"`
+	// 只读：任务号（T-000012），从主键派生，发给 AI 时用它定位
+	No string `gorm:"-" json:"no"`
 }
 
 // 子任务：一个任务内部的步骤清单。
@@ -154,6 +174,53 @@ type Subtask struct {
 	Title  string `gorm:"size:255;not null" json:"title"`
 	Done   bool   `gorm:"index" json:"done"`
 	Sort   int    `json:"sort"`
+}
+
+// 工单：客户通过公开提报链接提交的问题反馈。
+// 用独立表而不是复用 Task：Task 是内部待办，没有对外字段；
+// 工单需要按「客户能看到什么」分层，混在一张表里迟早会把内部字段漏给客户。
+type Ticket struct {
+	Base
+	ProjectID uint   `gorm:"index;not null" json:"projectId"`
+	ClientID  *uint  `gorm:"index" json:"clientId"`
+	Title     string `gorm:"size:255;not null" json:"title"`
+	Desc      string `gorm:"type:text" json:"desc"`
+	// 期望效果：客户认为做到什么程度算解决
+	Expect  string `gorm:"type:text" json:"expect"`
+	PageURL string `gorm:"size:1024" json:"pageUrl"`
+
+	// pending 待处理 / doing 处理中 / waiting 待客户确认 / closed 已关闭
+	Status string `gorm:"size:16;index" json:"status"`
+	// 打回轮次：客户确认不通过一次加一
+	Round int `gorm:"default:0" json:"round"`
+
+	Reporter string `gorm:"size:64" json:"reporter"`
+	Contact  string `gorm:"size:128" json:"contact"`
+
+	// 一张工单一个 Token：客户只能看自己这一张，看不到同项目其他工单
+	AccessToken *string    `gorm:"size:64;uniqueIndex" json:"-"`
+	CloseNote   string     `gorm:"type:text" json:"closeNote"`
+	ClosedAt    *time.Time `json:"closedAt"`
+
+	// 只读
+	No           string          `gorm:"-" json:"no"`
+	ProjectName  string          `gorm:"-" json:"projectName"`
+	ClientName   string          `gorm:"-" json:"clientName"`
+	AccessPath   string          `gorm:"-" json:"accessPath,omitempty"`
+	MessageCount int             `gorm:"-" json:"messageCount"`
+	Messages     []TicketMessage `gorm:"-" json:"messages,omitempty"`
+	Attachments  []Attachment    `gorm:"-" json:"attachments,omitempty"`
+}
+
+// 工单沟通记录。Visibility=internal 的条目只在内部详情出现，
+// 公开接口一律按 public 过滤。
+type TicketMessage struct {
+	Base
+	TicketID   uint   `gorm:"index;not null" json:"ticketId"`
+	Side       string `gorm:"size:16;index" json:"side"`                // customer 客户 / owner 我方
+	Visibility string `gorm:"size:16;default:public" json:"visibility"` // public 客户可见 / internal 仅内部
+	Body       string `gorm:"type:text" json:"body"`
+	AuthorName string `gorm:"size:64" json:"authorName"`
 }
 
 // 通用到期提醒（证书 / 域名 / 服务器续费 / 客户续费 / 其他）
@@ -309,6 +376,7 @@ type Attachment struct {
 	TaskID    *uint  `gorm:"index" json:"taskId"`
 	ProjectID *uint  `gorm:"index" json:"projectId"`
 	ContentID *uint  `gorm:"index" json:"contentId"`
+	TicketID  *uint  `gorm:"index" json:"ticketId"`
 	// 只读：访问地址
 	URL string `gorm:"-" json:"url"`
 }
@@ -317,6 +385,7 @@ func AllModels() []any {
 	return []any{
 		&User{}, &LoginAttempt{}, &Client{}, &Project{}, &Payment{}, &Task{},
 		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{}, &Idea{},
-		&Content{}, &Subtask{}, &Attachment{},
+		&Content{}, &Subtask{}, &Attachment{}, &WorkLog{},
+		&Ticket{}, &TicketMessage{},
 	}
 }

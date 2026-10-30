@@ -42,7 +42,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 	h.DB.Model(&model.Task{}).Where("status = ?", "todo").Count(&taskTodo)
 	h.DB.Model(&model.Task{}).Where("status = ?", "doing").Count(&taskDoing)
 	h.DB.Model(&model.Task{}).
-		Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled"}).
+		Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled", "archived"}).
 		Count(&taskOverdue)
 
 	now := time.Now()
@@ -126,7 +126,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 	// 都显式初始化为空切片：Go 的 nil slice 会序列化成 JSON null，
 	// 前端对 null 调用 .some()/.map() 会直接崩，空数据账号首屏就会白屏。
 	overdueTasks := []model.Task{}
-	h.DB.Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled"}).
+	h.DB.Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled", "archived"}).
 		Order("due_date ASC").Limit(10).Find(&overdueTasks)
 
 	pendingPayments := []model.Payment{}

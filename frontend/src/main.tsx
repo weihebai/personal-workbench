@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
 import TasksPage from './pages/TasksPage'
+import TicketsPage from './pages/TicketsPage'
 import PaymentsPage from './pages/PaymentsPage'
 import RemindersPage from './pages/RemindersPage'
 import IdeasPage from './pages/IdeasPage'
@@ -18,6 +19,8 @@ import ContentEditorPage from './pages/ContentEditorPage'
 import ClientsPage from './pages/ClientsPage'
 import SettingsPage from './pages/SettingsPage'
 import PublicSharePage from './pages/PublicSharePage'
+import PublicFeedbackPage from './pages/PublicFeedbackPage'
+import PublicTicketPage from './pages/PublicTicketPage'
 import { getToken } from './lib/api'
 
 const queryClient = new QueryClient({
@@ -39,6 +42,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <Route path="/login" element={<LoginPage />} />
           {/* 公开分享阅读页：不需要登录，也不能套 AppShell */}
           <Route path="/share/:token" element={<PublicSharePage />} />
+          {/* 客户提报页与工单进度页：同样免登录 */}
+          <Route path="/feedback/:token" element={<PublicFeedbackPage />} />
+          <Route path="/t/:token" element={<PublicTicketPage />} />
           <Route
             element={
               <RequireAuth>
@@ -50,6 +56,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/:id" element={<ProjectDetailPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/reminders" element={<RemindersPage />} />
             <Route path="/ideas" element={<IdeasPage />} />

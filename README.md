@@ -14,7 +14,8 @@
 | **项目** | 项目资料 + **资产索引**（源码目录、线上网址、管理后台、Git 仓库、部署位置、技术栈）+ 收入进度 + **中介抽成** + **里程碑进度** |
 | **里程碑** | 项目内交付节点（备案、验收、等反馈…），按工作日/自然日推算，临期自动跟进 |
 | **收款** | 分期收款节点、待收/已收/逾期状态、一键标记到账 |
-| **任务** | 看板拖拽（待办/进行中/已完成）+ 列表视图，支持优先级、截止日、工时、预算 |
+| **任务** | 看板拖拽（待办/进行中/待验收/已完成）+ 列表视图，已完成可归档，支持优先级、截止日、工时、预算 |
+| **工单** | 客户免登录提报问题、查看进度、确认关闭；提报链接与工单链接两套 Token 隔离 |
 | **到期提醒** | **证书/域名/服务器/客户续费** 通用到期提醒，按剩余天数分级预警，可配置 SMTP 邮件通知 |
 | **灵感记录** | **收件箱式**收集公众号/开源项目/文章，粘链接即存，之后逐条消化 |
 | **内容库** | **Markdown 编写/预览**，固定类型 + 标签，可传图，可从灵感一键整理，生成**可撤销的公开只读链接** |
@@ -71,6 +72,30 @@
 - **也可以直接指定日期**：不适合按工期算的节点，切到「直接指定日期」即可
 - **临期跟进**：未完成节点进入提前提醒窗口后，会出现在总览的「里程碑跟进」里
 
+### 工单（客户反馈）
+
+客户不一定有账号，也不想装 App。每个项目可以生成一条**客户提报链接**（`/feedback/<token>`），发给客户就能提交问题。
+
+**两套 Token**：
+
+| Token | 地址 | 能做什么 | 不能做什么 |
+|---|---|---|---|
+| 项目提报 Token | `/feedback/<token>` | 提交工单、查看本项目的工单列表和进度 | 看不到其他项目的工单 |
+| 工单访问 Token | `/t/<token>` | 查看并回复单张工单 | 看不到其他项目的工单 |
+
+项目提报链接是客户在这个项目下的统一入口：打开后先看到自己提过的问题列表，点进去看进度、补充说明、确认关闭。前提是**一个项目对应一个客户**——如果你有多个客户共用同一个项目，这个链接要慎发。
+
+工单访问链接在提交成功时返回一次，客户保存后也能单独用。
+
+- **四态流转**：待处理 → 处理中 → 待客户确认 → 已关闭
+- **打回**：客户在「待客户确认」时选「还没解决」，轮次加一，回到处理中，打回原因写进沟通记录
+- **内部备注**：我方回复默认只进内部记录，勾选「客户可见」才会出现在客户页面
+- **截图**：客户可传图，走同一套内容哈希存储与去重
+- **邮件提醒**：新工单提交后按已配置的 SMTP 给工作台主人发一封通知
+- **手动录入**：客户在微信/邮件里私发的问题，在工单页「录入工单」整理进来，也可以让 AI 代为录入
+
+内部看板在「工单」页，四列对应上面四个状态，点卡片可以看沟通记录、推进阶段、结案。
+
 ### 灵感记录
 
 刷公众号、逛 GitHub、看到好文章，先存下来，有空再慢慢消化。是一个**收件箱**，不是待办清单。
@@ -99,7 +124,7 @@
 
 状态分为草稿 / 待发 / 已发布 / 已归档，只用于个人整理，和是否开启分享互不影响。
 
-- **Markdown 编写**：桌面左写右看，移动端切换「编辑 / 预览」；支持标题、列表、表格、代码块、任务列表
+- **Markdown 编写**：桌面左写右看，移动端切换「编辑 / 预览」；支持标题、列表、表格、代码块、任务列表；编辑区带语法高亮和撤销栈，停止输入 800ms 自动保存，`Ctrl+S` 立即保存
 - **从灵感整理**：灵感卡片点「整理成内容」，自动带入想法、摘录和来源链接；同一灵感重复点击打开同一条，不会重复创建
 - **图片附件**：拖拽、选择或 `Ctrl+V` 粘贴，复用现有内容寻址上传与去重；上传后可以一键「插入正文」，正文里也能直接粘图或点工具栏图片按钮，Markdown 会写入 `![描述](地址)`
 - **点图预览**：正文和附件里的图片点击后在页面内弹窗查看，不跳新标签页；`Esc` 或点空白处关闭
@@ -177,21 +202,33 @@ cd frontend && pnpm test     # Vitest + Testing Library（jsdom）
 ## MCP：让 AI 管理项目和任务
 
 工作台内置 MCP（Model Context Protocol）端点，AI 客户端（Claude、ZCode、Cursor 等）
-连上之后就能直接查询/创建/编辑项目、任务和到期提醒。工具经 `internal/mcpbridge` 走 HTTP API 操作数据，
+连上之后就能直接查询/创建/编辑项目、任务、工时记录和到期提醒。工具经 `internal/mcpbridge` 走 HTTP API 操作数据，
 数据库零侵入。
 
 | 工具 | 说明 |
 |---|---|
-| `list_projects` | 列项目（合同额/已收/抽成汇总），支持按状态、类型、关键词过滤 |
-| `get_project` | 项目详情（含收款记录、任务、里程碑） |
-| `create_project` | 创建项目 |
+| `list_projects` | 列项目（合同额/已收/抽成/计费方式汇总），支持按状态、类型、关键词过滤 |
+| `get_project` | 项目详情（含收款记录、任务、里程碑、工时记录） |
+| `create_project` | 创建项目（固定总价 / 按工时计费） |
 | `update_project` | 编辑项目，**只提交的字段会更新**，其他字段不受影响 |
 | `list_tasks` | 列任务，支持按项目/状态/优先级/逾期过滤 |
 | `create_task` | 创建任务（可关联项目） |
 | `update_task` | 编辑任务（改状态、优先级、截止日等）。AI 完成后只允许流转到「待验收」，`done` 由人工设置 |
 | `get_task_attachments` | 读取任务上的截图，以图片返回给 AI（处理打回、看现场截图时用） |
+| `list_work_logs` | 列某个项目的工时记录（日期、工时、工作内容） |
+| `create_work_log` | 记录一次工时（小时 + 工作内容），按工时计费项目自动更新应结金额 |
+| `update_work_log` | 修改工时记录（工时、工作内容、日期） |
+| `search_contents` | 检索内容库，按关键词匹配标题/正文/标签，可按类型、状态、项目、客户筛选 |
+| `get_content` | 读取一篇内容的完整正文和元数据 |
+| `update_content` | 修改内容，只提交要改的字段；正文是整篇覆盖，没有版本历史 |
+| `edit_content` | 按原文片段精确替换正文，默认要求唯一匹配，不用重写整篇 |
+| `create_content` | 在内容库新建一篇内容 |
 | `list_reminders` | 列到期提醒（证书/域名/服务器/客户续费），含到期日、剩余天数、是否已过期 |
 | `create_reminder` | 新建到期提醒，进入提前提醒天数或过期后由工作台发邮件通知 |
+| `list_tickets` | 列客户工单，支持按状态/项目/关键词过滤，关键词可以直接填工单号 |
+| `get_ticket` | 工单详情：描述、期望效果、页面地址、沟通记录和截图 |
+| `create_ticket` | 代客户录入工单（客户私发的问题），可带反馈人和联系方式 |
+| `update_ticket` | 推进工单或追加沟通记录。AI 最多推到「待客户确认」，`closed` 只能人工结案或客户确认 |
 
 没有删除类工具——AI 误操作的代价不可控，删除请在页面里手动做。
 
@@ -474,7 +511,7 @@ POST   /api/payments
 PUT    /api/payments/:id
 DELETE /api/payments/:id
 
-GET    /api/tasks                 任务（sort=due、overdue=1）
+GET    /api/tasks                 任务（sort=due、overdue=1、excludeStatus=archived）
 POST   /api/tasks
 PUT    /api/tasks/:id             部分字段更新（看板拖拽用）
 DELETE /api/tasks/:id
@@ -484,6 +521,15 @@ POST   /api/tasks/:id/subtasks    加一步
 POST   /api/tasks/:id/subtasks/bulk  多行文本一次拆成多步
 PUT    /api/subtasks/:id          改标题 / 勾选完成
 DELETE /api/subtasks/:id
+
+GET    /api/tickets              工单列表（支持 status/projectId/q）
+POST   /api/tickets              内部录入工单
+GET    /api/tickets/:id          工单详情（含沟通记录与截图）
+PUT    /api/tickets/:id          推进状态 / 追加沟通 / 结案
+DELETE /api/tickets/:id
+POST   /api/projects/:id/feedback-token         生成或返回客户提报链接
+POST   /api/projects/:id/feedback-token/rotate  换新链接（旧链接立即失效）
+DELETE /api/projects/:id/feedback-token         撤销提报
 
 POST   /api/attachments           上传图片（multipart: file + taskId?/projectId?/contentId?）
 GET    /api/attachments           图片列表（按 taskId/projectId/contentId 筛）
@@ -537,6 +583,12 @@ POST   /api/contents/:id/share/rotate  轮换 Token（旧链接立即失效）
 DELETE /api/contents/:id/share    撤销分享
 
 GET    /api/public/contents/:token  公开只读读取（不鉴权，Token 不可枚举）
+GET    /api/public/feedback/:token  客户入口：项目名 + 本项目工单摘要
+POST   /api/public/feedback/:token/tickets  客户提交工单
+GET    /api/public/tickets/:token   工单进度（只返回 public 字段）
+POST   /api/public/tickets/:token/messages  客户补充说明
+POST   /api/public/tickets/:token/confirm   客户确认关闭 / 打回
+POST   /api/public/tickets/:token/attachments  客户上传截图
 ```
 
 除以下公开接口外，其余接口均需 `Authorization: Bearer <token>`：
@@ -546,6 +598,8 @@ GET    /api/public/contents/:token  公开只读读取（不鉴权，Token 不�
 | `POST /api/auth/login` | 登录 |
 | `GET /api/health` | 健康检查 |
 | `GET /api/public/contents/:token` | 公开分享内容，只返回标题、正文、标签、更新时间、图片 |
+| `GET /api/public/feedback/:token` | 客户入口，只返回项目名和本项目工单摘要 |
+| `GET /api/public/tickets/:token` | 客户查看自己的工单，内部备注不外传 |
 | `GET /api/attachments/:hash/raw` | 图片直链 |
 
 `/api/public/contents/:token` 的 Token 是 64 位随机十六进制，猜不到就等于拿不到；Token 不存在、已撤销、已过期、内容已删除或已轮换时，统一返回 404 和「分享不存在或已失效」，不区分具体原因。
@@ -566,7 +620,9 @@ GET    /api/public/contents/:token  公开只读读取（不鉴权，Token 不�
 - JWT 短期有效（默认 7 天）
 - **退出即吊销**：登出或修改密码会让该账号的 token 版本号自增，旧 token 立刻失效，不用等到过期
 - **登录失败限流**：同一 IP 连续 5 次失败锁定 10 分钟，前 4 次会提示剩余尝试次数；记录存在 SQLite 里，重启不会清零
-- **分享 Token 不进日志**：访问日志里的 `/share/<token>` 与 `/api/public/contents/<token>` 统一打印为 `[redacted]`；Token 字段不直接返回给前端，公开接口只输出内容白名单
+- **分享 Token 不进日志**：访问日志里的 `/share/<token>`、`/feedback/<token>`、`/t/<token>` 与对应公开接口统一打印为 `[redacted]`；Token 字段不直接返回给前端，公开接口只输出内容白名单
+- **工单按项目隔离**：项目提报链接只能列出本项目的工单，看不到其他项目；前提是一个项目对应一个客户
+- **内部备注不外传**：工单沟通记录按 `visibility` 分层，公开接口只返回 `public` 条目
 - **公开页防收录**：分享页注入 `noindex, nofollow` 与 `no-referrer`，接口响应带 `Cache-Control: no-store`、`X-Robots-Tag`、`X-Content-Type-Options: nosniff`
 - **Markdown 安全渲染**：不渲染原始 HTML，经过 `rehype-sanitize`，链接协议限制为 `http` / `https` / `mailto`，外链带 `noopener noreferrer nofollow`
 - **撤销不等于删除图片**：撤销分享让页面链接立即 404，但已拿到的图片直链仍可访问（内容哈希不可枚举）

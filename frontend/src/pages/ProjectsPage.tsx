@@ -243,6 +243,8 @@ export default function ProjectsPage() {
             const kd = dictOf(PROJECT_KIND, p.kind)
             const sd = dictOf(PROJECT_STATUS, p.status)
             const pct = (p.netQuote ?? p.quote) > 0 ? Math.min(100, (p.received / (p.netQuote ?? p.quote)) * 100) : 0
+            // 公司项目不走自己的收款流程，卡片上不展示收入进度
+            const isCompany = p.kind === 'company'
             return (
               <Card
                 key={p.id}
@@ -265,6 +267,11 @@ export default function ProjectsPage() {
                       <Badge soft={sd.soft} dot={sd.color}>
                         {sd.label}
                       </Badge>
+                      {p.billingMode === 'hourly' && (
+                        <Badge className="border-cyan-200 bg-cyan-50 text-cyan-700">
+                          按工时{isCompany ? '' : ` ${money(p.hourlyRate)}/h`}
+                        </Badge>
+                      )}
                       {p.tags.map((t) => (
                         <Badge key={t} className="border-ink-200 bg-white text-ink-500">
                           {t}
@@ -291,39 +298,41 @@ export default function ProjectsPage() {
                   <p className="line-clamp-2 text-[11px] leading-relaxed text-ink-400">{p.summary}</p>
                 )}
 
-                {/* 收入进度 */}
-                <div className="space-y-1">
-                  <div className="flex items-baseline justify-between">
-                    <span className="tabular text-[13px] font-bold text-ink-900">
-                      {money(p.received, false)}
-                      <span className="ml-0.5 text-[10px] font-normal text-ink-400">
-                        / {money(p.netQuote ?? p.quote, false)}
+                {/* 收入进度：公司项目不展示 */}
+                {!isCompany && (
+                  <div className="space-y-1">
+                    <div className="flex items-baseline justify-between">
+                      <span className="tabular text-[13px] font-bold text-ink-900">
+                        {money(p.received, false)}
+                        <span className="ml-0.5 text-[10px] font-normal text-ink-400">
+                          / {money(p.netQuote ?? p.quote, false)}
+                        </span>
                       </span>
-                    </span>
-                    {p.commission > 0 && (
-                      <span className="rounded bg-amber-50 px-1 text-[9px] font-medium text-amber-600">
-                        抽成 {p.commissionType === 'pct' ? `${p.commissionRate}%` : money(p.commissionRate, false)}
+                      {p.commission > 0 && (
+                        <span className="rounded bg-amber-50 px-1 text-[9px] font-medium text-amber-600">
+                          抽成 {p.commissionType === 'pct' ? `${p.commissionRate}%` : money(p.commissionRate, false)}
+                        </span>
+                      )}
+                      <span
+                        className={cn(
+                          'tabular text-[10px] font-semibold',
+                          pct >= 100 ? 'text-emerald-600' : pct > 0 ? 'text-amber-600' : 'text-ink-400',
+                        )}
+                      >
+                        {pct >= 100 ? '已结清' : `${Math.round(pct)}%`}
                       </span>
-                    )}
-                    <span
-                      className={cn(
-                        'tabular text-[10px] font-semibold',
-                        pct >= 100 ? 'text-emerald-600' : pct > 0 ? 'text-amber-600' : 'text-ink-400',
-                      )}
-                    >
-                      {pct >= 100 ? '已结清' : `${Math.round(pct)}%`}
-                    </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-ink-100">
+                      <div
+                        className={cn(
+                          'h-full rounded-full transition-all',
+                          pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500',
+                        )}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-ink-100">
-                    <div
-                      className={cn(
-                        'h-full rounded-full transition-all',
-                        pct >= 100 ? 'bg-emerald-500' : 'bg-brand-500',
-                      )}
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                </div>
+                )}
 
                 {/* 里程碑进度 — 点击直达详情页的项目进度区 */}
                 {p.milestoneTotal > 0 ? (

@@ -48,8 +48,65 @@ func (h *Handler) r2Client() (*storage.R2, error) {
 	})
 }
 
-// POST /api/attachments   multipart/form-data: file, taskId?, projectId?
+// POST /api/attachments   multipart/form-data: file, taskId?, projectId?, contentId?, ticketId?
 func (h *Handler) UploadAttachment(c *gin.Context) {
+	taskID := postUint(c, "taskId")
+	projectID := postUint(c, "projectId")
+	contentID := postUint(c, "contentId")
+	ticketID := postUint(c, "ticketId")
+
+	// 归属关系：任务 / 项目 / 内容 / 工单四选一，多传直接拒绝，
+	// 否则一张图到底属于谁就说不清了。
+	owners := 0
+	for _, p := range []*uint{taskID, projectID, contentID, ticketID} {
+		if p != nil {
+			owners++
+		}
+	}
+	if owners > 1 {
+		badRequest(c, "图片只能归属任务、项目、内容或工单中的一处")
+		return
+	}
+	if contentID != nil {
+		var n int64
+		h.DB.Model(&model.Content{}).Where("id = ?", *contentID).Count(&n)
+		if n == 0 {
+			badRequest(c, "内容不存在")
+			return
+		}
+	}
+	if ticketID != nil {
+		var n int64
+		h.DB.Model(&model.Ticket{}).Where("id = ?", *ticketID).Count(&n)
+		if n == 0 {
+			badRequest(c, "工单不存在")
+			return
+		}
+	}
+
+	att, code, msg := h.storeImage(c, taskID, projectID, contentID, ticketID)
+	if att == nil {
+		fail(c, code, msg)
+		return
+	}
+	c.JSON(http.StatusOK, att)
+}
+
+func postUint(c *gin.Context, key string) *uint {
+	s := c.PostForm(key)
+	if s == "" {
+		return nil
+	}
+	id, err := parseUint(s)
+	if err != nil {
+		return nil
+	}
+	return &id
+}
+
+// storeImage 接收 multipart 里的 file，校验、去重、落盘并写记录。
+// 内部上传和公开提报共用这一份逻辑，区别只在归属字段由谁决定。
+func (h *Handler) storeImage(c *gin.Context, taskID, projectID, contentID, ticketID *uint) (*model.Attachment, int, string) {
 	if h.Cfg.MaxUploadBytes > 0 {
 		// 溢出保护，防止超大文件把内存吃光
 		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, h.Cfg.MaxUploadBytes+1024*1024)
@@ -57,26 +114,22 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 
 	fh, err := c.FormFile("file")
 	if err != nil {
-		badRequest(c, "没有收到文件")
-		return
+		return nil, http.StatusBadRequest, "没有收到文件"
 	}
 	if h.Cfg.MaxUploadBytes > 0 && fh.Size > h.Cfg.MaxUploadBytes {
-		badRequest(c, "图片太大，上限 "+humanSize(h.Cfg.MaxUploadBytes))
-		return
+		return nil, http.StatusBadRequest, "图片太大，上限 " + humanSize(h.Cfg.MaxUploadBytes)
 	}
 
 	src, err := fh.Open()
 	if err != nil {
-		serverErr(c, err)
-		return
+		return nil, http.StatusInternalServerError, err.Error()
 	}
 	defer src.Close()
 
 	// 先落到临时文件算哈希，避免整张图读进内存
 	tmp, err := os.CreateTemp("", "upload-*")
 	if err != nil {
-		serverErr(c, err)
-		return
+		return nil, http.StatusInternalServerError, err.Error()
 	}
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath)
@@ -85,26 +138,22 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 	size, err := io.Copy(io.MultiWriter(tmp, hash), src)
 	if err != nil {
 		tmp.Close()
-		serverErr(c, err)
-		return
+		return nil, http.StatusInternalServerError, err.Error()
 	}
 	// 真伪校验：只信文件头解出来的格式，不信客户端声明的 Content-Type
 	// （否则改个后缀就能上传任意内容）
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		tmp.Close()
-		serverErr(c, err)
-		return
+		return nil, http.StatusInternalServerError, err.Error()
 	}
 	cfg, format, err := image.DecodeConfig(tmp)
 	tmp.Close()
 	if err != nil {
-		badRequest(c, "这个文件不是有效的图片")
-		return
+		return nil, http.StatusBadRequest, "这个文件不是有效的图片"
 	}
 	ext, ok := map[string]string{"jpeg": ".jpg", "png": ".png", "gif": ".gif", "webp": ".webp"}[format]
 	if !ok {
-		badRequest(c, "只支持 jpg / png / gif / webp 格式")
-		return
+		return nil, http.StatusBadRequest, "只支持 jpg / png / gif / webp 格式"
 	}
 	mime := ""
 	for m, e := range allowedImageMime {
@@ -117,56 +166,14 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 	sum := hex.EncodeToString(hash.Sum(nil))
 	r2, r2Err := h.r2Client()
 	if r2Err != nil {
-		serverErr(c, r2Err)
-		return
+		return nil, http.StatusInternalServerError, r2Err.Error()
 	}
 	storageKind := "local"
 	if r2 != nil {
 		storageKind = "r2"
 	}
 
-	// 归属关系：任务 / 项目 / 内容三选一，多传直接拒绝，
-	// 否则一张图到底属于谁就说不清了。
-	var taskID, projectID, contentID *uint
-	if tid := c.PostForm("taskId"); tid != "" {
-		if id, e := parseUint(tid); e == nil {
-			taskID = &id
-		}
-	}
-	if pid := c.PostForm("projectId"); pid != "" {
-		if id, e := parseUint(pid); e == nil {
-			projectID = &id
-		}
-	}
-	if cid := c.PostForm("contentId"); cid != "" {
-		if id, e := parseUint(cid); e == nil {
-			contentID = &id
-		}
-	}
-	owners := 0
-	if taskID != nil {
-		owners++
-	}
-	if projectID != nil {
-		owners++
-	}
-	if contentID != nil {
-		owners++
-	}
-	if owners > 1 {
-		badRequest(c, "图片只能归属任务、项目或内容中的一处")
-		return
-	}
-	if contentID != nil {
-		var n int64
-		h.DB.Model(&model.Content{}).Where("id = ?", *contentID).Count(&n)
-		if n == 0 {
-			badRequest(c, "内容不存在")
-			return
-		}
-	}
-
-	// 同一张图挂到同一个任务/项目/内容上：直接返回已有记录，避免重复粘贴产生两条一样的
+	// 同一张图挂到同一个任务/项目/内容/工单上：直接返回已有记录，避免重复粘贴产生两条一样的
 	var dup model.Attachment
 	dupQ := h.DB.Where("hash = ? AND storage = ?", sum, storageKind)
 	if taskID != nil {
@@ -175,41 +182,38 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 		dupQ = dupQ.Where("project_id = ? AND task_id IS NULL", *projectID)
 	} else if contentID != nil {
 		dupQ = dupQ.Where("content_id = ? AND task_id IS NULL AND project_id IS NULL", *contentID)
+	} else if ticketID != nil {
+		dupQ = dupQ.Where("ticket_id = ? AND task_id IS NULL AND project_id IS NULL AND content_id IS NULL", *ticketID)
 	} else {
-		dupQ = dupQ.Where("task_id IS NULL AND project_id IS NULL AND content_id IS NULL")
+		dupQ = dupQ.Where("task_id IS NULL AND project_id IS NULL AND content_id IS NULL AND ticket_id IS NULL")
 	}
 	if err := dupQ.First(&dup).Error; err == nil {
 		dup.URL = "/api/attachments/" + dup.Hash + "/raw"
-		c.JSON(http.StatusOK, dup)
-		return
+		return &dup, 0, ""
 	}
 
 	if r2 != nil {
 		f, openErr := os.Open(tmpPath)
 		if openErr != nil {
-			serverErr(c, openErr)
-			return
+			return nil, http.StatusInternalServerError, openErr.Error()
 		}
 		defer f.Close()
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 60*time.Second)
 		defer cancel()
 		if err := r2.Put(ctx, h.objectKey(sum, ext), f, size, mime); err != nil {
-			serverErr(c, err)
-			return
+			return nil, http.StatusInternalServerError, err.Error()
 		}
 	} else {
 		// 文件已存在就不重复写（内容寻址，同名即同内容）
 		dst := h.filePathFor(sum, ext)
 		if _, statErr := os.Stat(dst); statErr != nil {
 			if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-				serverErr(c, err)
-				return
+				return nil, http.StatusInternalServerError, err.Error()
 			}
 			if err := os.Rename(tmpPath, dst); err != nil {
 				// 跨盘时 Rename 会失败，退化成复制
 				if err := copyFile(tmpPath, dst); err != nil {
-					serverErr(c, err)
-					return
+					return nil, http.StatusInternalServerError, err.Error()
 				}
 			}
 		}
@@ -226,13 +230,13 @@ func (h *Handler) UploadAttachment(c *gin.Context) {
 		TaskID:    taskID,
 		ProjectID: projectID,
 		ContentID: contentID,
+		TicketID:  ticketID,
 	}
 	if err := h.DB.Create(&att).Error; err != nil {
-		serverErr(c, err)
-		return
+		return nil, http.StatusInternalServerError, err.Error()
 	}
 	att.URL = "/api/attachments/" + att.Hash + "/raw"
-	c.JSON(http.StatusOK, att)
+	return &att, 0, ""
 }
 
 // 磁盘路径：data/uploads/ab/abcdef....jpg（分两级，避免单目录堆几万个文件）
@@ -322,6 +326,9 @@ func (h *Handler) ListAttachments(c *gin.Context) {
 	}
 	if id := queryUint(c, "contentId"); id != nil {
 		q = q.Where("content_id = ?", *id)
+	}
+	if id := queryUint(c, "ticketId"); id != nil {
+		q = q.Where("ticket_id = ?", *id)
 	}
 	var items []model.Attachment
 	if err := q.Order("id DESC").Limit(200).Find(&items).Error; err != nil {

@@ -66,6 +66,10 @@ export interface Project {
   clientId?: number | null
   quote: number
   cost: number
+  /** fixed 固定总价 / hourly 按工时计费 */
+  billingMode: 'fixed' | 'hourly'
+  /** 时薪（元/小时），仅按工时计费时有意义 */
+  hourlyRate: number
   commissionType: 'none' | 'pct' | 'fixed'
   commissionRate: number
   broker: string
@@ -86,6 +90,10 @@ export interface Project {
   milestoneDone: number
   nextMilestone: string
   nextDueIn?: number | null
+  /** 客户提报链接的 Token；空表示还没生成 */
+  feedbackToken?: string | null
+  /** 提报链接路径，如 /feedback/xxxxx */
+  feedbackPath?: string
 }
 
 export interface Payment {
@@ -107,13 +115,26 @@ export interface Payment {
   projectName?: string
 }
 
+/** 工时记录：按工时计费的项目逐次记录时长和工作内容 */
+export interface WorkLog {
+  id: number
+  projectId: number
+  workDate: string
+  minutes: number
+  content: string
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Task {
   id: number
+  /** 任务号，如 T-000012，发给 AI 定位用 */
+  no?: string
   title: string
   desc: string
   projectId?: number | null
   clientId?: number | null
-  status: 'todo' | 'doing' | 'review' | 'done' | 'canceled'
+  status: 'todo' | 'doing' | 'review' | 'done' | 'canceled' | 'archived'
   priority: 'low' | 'normal' | 'high' | 'urgent'
   kind: string
   /** 验收标准：一行一条，任务完成的判定依据。AI 完成后流转到 review 待人工验收 */
@@ -156,6 +177,7 @@ export interface Attachment {
   taskId?: number | null
   projectId?: number | null
   contentId?: number | null
+  ticketId?: number | null
   url: string
   createdAt: string
 }
@@ -333,5 +355,80 @@ export interface PublicContent {
   body: string
   tags: string[]
   updatedAt: string
+  attachments: { url: string; width: number; height: number }[]
+}
+
+/* ---------- 工单（客户反馈） ---------- */
+
+export type TicketStatus = 'pending' | 'doing' | 'waiting' | 'closed'
+
+/** 工单沟通记录。visibility=internal 的条目只在内部详情出现 */
+export interface TicketMessage {
+  id: number
+  ticketId: number
+  side: 'customer' | 'owner'
+  visibility: 'public' | 'internal'
+  body: string
+  authorName: string
+  createdAt: string
+}
+
+export interface Ticket {
+  id: number
+  /** 工单号，如 WT-000012 */
+  no: string
+  projectId: number
+  projectName?: string
+  clientId?: number | null
+  clientName?: string
+  title: string
+  desc: string
+  expect: string
+  pageUrl: string
+  status: TicketStatus
+  /** 客户打回次数 */
+  round: number
+  reporter: string
+  contact: string
+  closeNote: string
+  closedAt?: string | null
+  /** 客户查看进度的链接，如 /t/xxxxx */
+  accessPath?: string
+  messageCount: number
+  messages?: TicketMessage[]
+  attachments?: Attachment[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** 客户提报入口：项目信息 + 自己提交过的工单摘要 */
+export interface PublicFeedback {
+  projectName: string
+  projectSummary: string
+  tickets: {
+    no: string
+    title: string
+    status: TicketStatus
+    round: number
+    updatedAt: string
+    accessPath: string
+  }[]
+}
+
+export interface PublicTicket {
+  no: string
+  title: string
+  desc: string
+  expect: string
+  pageUrl: string
+  status: TicketStatus
+  round: number
+  reporter: string
+  closeNote: string
+  projectName: string
+  createdAt: string
+  updatedAt: string
+  closedAt?: string | null
+  messages: { side: 'customer' | 'owner'; body: string; authorName: string; createdAt: string }[]
   attachments: { url: string; width: number; height: number }[]
 }

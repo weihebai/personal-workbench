@@ -104,6 +104,8 @@ type projectInput struct {
 	ClientID        *uint    `json:"clientId"`
 	Quote           float64  `json:"quote"`
 	Cost            float64  `json:"cost"`
+	BillingMode     string   `json:"billingMode"`
+	HourlyRate      float64  `json:"hourlyRate"`
 	CommissionType  string   `json:"commissionType"`
 	CommissionRate  float64  `json:"commissionRate"`
 	Broker          string   `json:"broker"`
@@ -121,6 +123,7 @@ func (in projectInput) toModel() model.Project {
 		SourcePath: in.SourcePath, OnlineURL: in.OnlineURL, AdminURL: in.AdminURL,
 		GitRepo: in.GitRepo, DeployAt: in.DeployAt, TechStack: in.TechStack,
 		ClientID: in.ClientID, Quote: in.Quote, Cost: in.Cost,
+		BillingMode: in.BillingMode, HourlyRate: in.HourlyRate,
 		CommissionType: in.CommissionType, CommissionRate: in.CommissionRate, Broker: in.Broker,
 		StartDate: mustParseDate(in.StartDate), DueDate: mustParseDate(in.DueDate),
 		EstimateMinutes: in.EstimateMinutes, ActualMinutes: in.ActualMinutes,
@@ -318,7 +321,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 	h.DB.Where("project_id = ?", id).Order("plan_date ASC").Find(&payments)
 	decoratePayments(payments, h.paymentCreditDays())
 	var tasks []model.Task
-	h.DB.Where("project_id = ?", id).Order("created_at DESC").Limit(50).Find(&tasks)
+	h.DB.Where("project_id = ? AND status <> ?", id, "archived").Order("created_at DESC").Limit(50).Find(&tasks)
 	var client *model.Client
 	if p.ClientID != nil {
 		var cl model.Client
@@ -328,6 +331,10 @@ func (h *Handler) GetProject(c *gin.Context) {
 	}
 	var reminders []model.Reminder
 	h.DB.Where("project_id = ?", id).Order("expire_at ASC").Find(&reminders)
+
+	// 工时记录：按日期倒序，最近记的那条排最前
+	workLogs := []model.WorkLog{}
+	h.DB.Where("project_id = ?", id).Order("work_date DESC, id DESC").Find(&workLogs)
 
 	var milestones []model.Milestone
 	h.DB.Where("project_id = ?", id).Order("due_date IS NULL, due_date ASC, sort ASC").Find(&milestones)
@@ -347,6 +354,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 		"client":     client,
 		"reminders":  reminders,
 		"milestones": msViews,
+		"workLogs":   workLogs,
 	})
 }
 
@@ -366,6 +374,13 @@ func (h *Handler) CreateProject(c *gin.Context) {
 	}
 	if p.Status == "" {
 		p.Status = "active"
+	}
+	if p.BillingMode == "" {
+		p.BillingMode = "fixed"
+	}
+	// 按工时计费时合同额由工时记录算，不接受手填
+	if p.BillingMode == "hourly" {
+		p.Quote = 0
 	}
 	if err := h.DB.Create(&p).Error; err != nil {
 		serverErr(c, err)
@@ -408,6 +423,7 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		"name": "name", "kind": "kind", "status": "status", "summary": "summary",
 		"sourcePath": "source_path", "onlineUrl": "online_url", "adminUrl": "admin_url",
 		"gitRepo": "git_repo", "deployAt": "deploy_at", "techStack": "tech_stack",
+		"billingMode":    "billing_mode",
 		"commissionType": "commission_type", "broker": "broker", "note": "note",
 	}
 	for js, col := range strFields {
@@ -416,13 +432,22 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 		}
 	}
 	numFields := map[string]string{
-		"quote": "quote", "cost": "cost", "commissionRate": "commission_rate",
+		"quote": "quote", "cost": "cost", "hourlyRate": "hourly_rate",
+		"commissionRate":  "commission_rate",
 		"estimateMinutes": "estimate_minutes", "actualMinutes": "actual_minutes",
 	}
 	for js, col := range numFields {
 		if v, ok := raw[js]; ok {
 			updates[col] = v
 		}
+	}
+	// 按工时计费时合同额由累计工时和时薪算出，不收手填值
+	billingMode := cur.BillingMode
+	if v, ok := raw["billingMode"]; ok {
+		billingMode = toString(v)
+	}
+	if billingMode == "hourly" {
+		delete(updates, "quote")
 	}
 	if v, ok := raw["clientId"]; ok {
 		updates["client_id"] = v
@@ -439,6 +464,10 @@ func (h *Handler) UpdateProject(c *gin.Context) {
 			serverErr(c, err)
 			return
 		}
+	}
+	// 切到按工时计费或改了时薪，都要按现有工时重算合同额
+	if billingMode == "hourly" {
+		h.syncHourlyQuote(id)
 	}
 	// 标签只在显式传来时才同步，避免只改状态时把标签清掉
 	if arr, ok := raw["tags"].([]any); ok {
@@ -474,6 +503,9 @@ func (h *Handler) DeleteProject(c *gin.Context) {
 			return err
 		}
 		if err := tx.Where("project_id = ?", id).Delete(&model.Milestone{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("project_id = ?", id).Delete(&model.WorkLog{}).Error; err != nil {
 			return err
 		}
 		// 内容库里关联的项目只是软链接，项目删了内容要保留

@@ -36,6 +36,8 @@ import {
   Loader2,
   X,
   ChevronDown,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react'
 import { api, errMsg, type Paged, type Task, type Attachment } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -129,7 +131,7 @@ export default function TasksPage() {
   const [q, setQ] = useState('')
   const [priority, setPriority] = useState('')
   const [kind, setKind] = useState('')
-  const [view, setView] = useState<'board' | 'list'>('board')
+  const [view, setView] = useState<'board' | 'list' | 'archived'>('board')
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
   const [activeId, setActiveId] = useState<number | null>(null)
@@ -146,9 +148,20 @@ export default function TasksPage() {
         await api.get<Paged<Task>>('/tasks', {
           // withSubtasks=1：卡片上要能直接展开勾选，一次把步骤带回来，
           // 比每张卡展开时再各发一个请求省事
-          params: { q, priority, kind, size: 200, sort: 'due', withSubtasks: 1 },
+          params: { q, priority, kind, size: 200, sort: 'due', withSubtasks: 1, excludeStatus: 'archived' },
         })
       ).data,
+  })
+
+  const { data: archivedData, isLoading: archivedLoading } = useQuery({
+    queryKey: ['tasks', 'archived'],
+    queryFn: async () =>
+      (
+        await api.get<Paged<Task>>('/tasks', {
+          params: { status: 'archived', size: 200, sort: 'due' },
+        })
+      ).data,
+    enabled: view === 'archived',
   })
 
   const patch = useMutation({
@@ -169,6 +182,7 @@ export default function TasksPage() {
   })
 
   const items = data?.items ?? []
+  const archivedItems = archivedData?.items ?? []
   const grouped = useMemo(() => {
     const g: Record<string, Task[]> = { todo: [], doing: [], review: [], done: [], canceled: [] }
     for (const t of items) (g[t.status] ??= []).push(t)
@@ -205,6 +219,7 @@ export default function TasksPage() {
     const t = ctxTask
     if (!t) return []
     const hasSteps = (t.subtaskTotal ?? 0) > 0
+    const archived = t.status === 'archived'
     return [
       {
         label: '编辑任务',
@@ -225,22 +240,35 @@ export default function TasksPage() {
         },
       },
       { type: 'separator' },
-      {
-        label: t.status === 'done' ? '标记为未完成' : '标记为已完成',
-        icon: <CheckSquare size={12} />,
-        onClick: () => patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } }),
-      },
-      ...COLUMNS.filter((c) => c.key !== t.status && c.key !== 'done').map((c) => ({
-        label: `移到「${c.label}」`,
-        icon: <ArrowRight size={12} />,
-        onClick: () => patch.mutate({ id: t.id, body: { status: c.key } }),
-      })),
+      ...(!archived
+        ? [
+            {
+              label: t.status === 'done' ? '标记为未完成' : '标记为已完成',
+              icon: <CheckSquare size={12} />,
+              onClick: () => patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } }),
+            },
+            ...COLUMNS.filter((c) => c.key !== t.status && c.key !== 'done').map((c) => ({
+              label: `移到「${c.label}」`,
+              icon: <ArrowRight size={12} />,
+              onClick: () => patch.mutate({ id: t.id, body: { status: c.key } }),
+            })),
+          ]
+        : []),
       { type: 'separator' as const },
       {
         label: '复制标题',
         icon: <Copy size={12} />,
         onClick: () => navigator.clipboard?.writeText(t.title),
       },
+      ...(t.status === 'done' || archived
+        ? [
+            {
+              label: archived ? '恢复到已完成' : '归档任务',
+              icon: archived ? <ArchiveRestore size={12} /> : <Archive size={12} />,
+              onClick: () => patch.mutate({ id: t.id, body: { status: archived ? 'done' : 'archived' } }),
+            },
+          ]
+        : []),
       {
         label: '删除任务',
         icon: <Trash2 size={12} />,
@@ -269,7 +297,11 @@ export default function TasksPage() {
     <div>
       <PageHeader
         title="任务"
-        desc={`${items.length} 个任务${overdueCount ? ` · ${overdueCount} 个已逾期` : ''}`}
+        desc={
+          view === 'archived'
+            ? `${archivedItems.length} 个已归档任务`
+            : `${items.length} 个任务${overdueCount ? ` · ${overdueCount} 个已逾期` : ''}`
+        }
         actions={
           <Button size="sm" onClick={() => setCreating(true)}>
             <Plus size={14} /> 新建任务
@@ -308,6 +340,15 @@ export default function TasksPage() {
           >
             <ListFilter size={12} /> 列表
           </button>
+          <button
+            onClick={() => setView('archived')}
+            className={cn(
+              'flex h-7 items-center gap-1 rounded px-2 text-[11px] font-medium',
+              view === 'archived' ? 'bg-ink-100 text-ink-900' : 'text-ink-400',
+            )}
+          >
+            <Archive size={12} /> 已归档
+          </button>
         </div>
       </div>
 
@@ -317,6 +358,78 @@ export default function TasksPage() {
             <Skeleton key={i} className="h-64" />
           ))}
         </div>
+      ) : view === 'archived' ? (
+        <Card padding={false} className="overflow-hidden">
+          {archivedLoading ? (
+            <div className="p-3">
+              <Skeleton className="h-24" />
+            </div>
+          ) : archivedItems.length === 0 ? (
+            <EmptyState
+              icon={<Archive size={20} />}
+              title="没有已归档的任务"
+              desc="已完成的任务可以归档，归档后不会再出现在看板和列表里"
+            />
+          ) : (
+            <table className="w-full text-xs">
+              <thead>
+                <tr className="border-b border-[var(--border)] bg-ink-50/60 text-left text-[10px] uppercase tracking-wide text-ink-400">
+                  <th className="px-3 py-2 font-medium">任务</th>
+                  <th className="hidden px-2 py-2 font-medium sm:table-cell">项目</th>
+                  <th className="px-2 py-2 font-medium">完成时间</th>
+                  <th className="px-2 py-2 font-medium">状态</th>
+                  <th className="px-2 py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {archivedItems.map((t) => {
+                  const ts = dictOf(TASK_STATUS, t.status)
+                  return (
+                    <tr
+                      key={t.id}
+                      onContextMenu={(e) => openCtx(e, t)}
+                      onDoubleClick={() => setEditing(t)}
+                      className="border-b border-[var(--border)] hover:bg-ink-50/60"
+                    >
+                      <td className="px-3 py-2">
+                        <span className="truncate text-ink-400">
+                          {t.no && <span className="tabular mr-1.5 text-[10px] text-ink-400">{t.no}</span>}
+                          {t.title}
+                        </span>
+                      </td>
+                      <td className="hidden px-2 py-2 text-ink-500 sm:table-cell" data-private>
+                        {t.projectName || '—'}
+                      </td>
+                      <td className="tabular px-2 py-2 text-ink-500">{fmtDateShort(t.doneAt)}</td>
+                      <td className="px-2 py-2">
+                        <Badge soft={ts.soft} dot={ts.color}>
+                          {ts.label}
+                        </Badge>
+                      </td>
+                      <td className="px-2 py-2 text-right">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => patch.mutate({ id: t.id, body: { status: 'done' } })}
+                        >
+                          <ArchiveRestore size={12} /> 恢复
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          title="删除任务"
+                          onClick={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
+                        >
+                          <Trash2 size={12} className="text-red-400" />
+                        </Button>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </Card>
       ) : items.length === 0 ? (
         <Card>
           <EmptyState
@@ -352,6 +465,7 @@ export default function TasksPage() {
                       patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
                     }
                     onEdit={() => setEditing(t)}
+                    onArchive={() => patch.mutate({ id: t.id, body: { status: 'archived' } })}
                     onDelete={() => confirm(`删除任务「${t.title}」？`) && del.mutate(t.id)}
                     onContextMenu={(e) => openCtx(e, t)}
                     onAccept={() => patch.mutate({ id: t.id, body: { status: 'done' } })}
@@ -368,7 +482,14 @@ export default function TasksPage() {
           <DragOverlay dropAnimation={null}>
             {activeTask ? (
               <div className="rotate-1 opacity-95 shadow-xl">
-                <TaskCard task={activeTask} overlay onToggle={() => {}} onEdit={() => {}} onDelete={() => {}} />
+                <TaskCard
+                  task={activeTask}
+                  overlay
+                  onToggle={() => {}}
+                  onEdit={() => {}}
+                  onArchive={() => {}}
+                  onDelete={() => {}}
+                />
               </div>
             ) : null}
           </DragOverlay>
@@ -414,6 +535,7 @@ export default function TasksPage() {
                               t.status === 'done' && 'text-ink-400 line-through',
                             )}
                           >
+                            {t.no && <span className="tabular mr-1.5 text-[10px] text-ink-400">{t.no}</span>}
                             {t.title}
                           </span>
                           <StepsToggle task={t} open={open} onToggle={() => toggleSteps(t.id)} />
@@ -460,6 +582,16 @@ export default function TasksPage() {
                         </Badge>
                       </td>
                       <td className="px-2 py-2 text-right">
+                        {t.status === 'done' && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="归档任务"
+                            onClick={() => patch.mutate({ id: t.id, body: { status: 'archived' } })}
+                          >
+                            <Archive size={12} />
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" onClick={() => setEditing(t)}>
                           <Pencil size={12} />
                         </Button>
@@ -565,6 +697,7 @@ function TaskCard({
   onToggleSteps,
   onToggle,
   onEdit,
+  onArchive,
   onDelete,
   onContextMenu,
   onAccept,
@@ -577,6 +710,7 @@ function TaskCard({
   onToggleSteps?: () => void
   onToggle: () => void
   onEdit: () => void
+  onArchive?: () => void
   onDelete: () => void
   onContextMenu?: (e: React.MouseEvent) => void
   /** 待验收卡片的就地验收动作 */
@@ -644,12 +778,15 @@ function TaskCard({
           title={task.status === 'review' ? '勾选 = 验收通过，标记完成' : undefined}
           className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-emerald-500"
         />
-        <p
-          data-task-title={task.id}
-          className={cn('flex-1 text-xs font-medium leading-snug', done && 'text-ink-400 line-through')}
-        >
-          {task.title}
-        </p>
+        <div className="min-w-0 flex-1">
+          {task.no && <p className="tabular text-[10px] leading-4 text-ink-400">{task.no}</p>}
+          <p
+            data-task-title={task.id}
+            className={cn('text-xs font-medium leading-snug', done && 'text-ink-400 line-through')}
+          >
+            {task.title}
+          </p>
+        </div>
         {/* 手柄：鼠标可以从整张卡拖，手指必须按这里。
             常驻显示，顺带告诉用户「这张卡是可以拖的」。
             touch-none 是 dnd-kit 触摸拖拽的必要条件，只能加在手柄上。 */}
@@ -663,6 +800,11 @@ function TaskCard({
           <GripVertical size={12} />
         </button>
         <div className="flex shrink-0 opacity-0 transition-opacity group-hover:opacity-100">
+          {done && onArchive && (
+            <Button variant="ghost" size="icon" className="h-6 w-6" title="归档任务" onClick={onArchive}>
+              <Archive size={11} />
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="h-6 w-6" onClick={onEdit}>
             <Pencil size={11} />
           </Button>

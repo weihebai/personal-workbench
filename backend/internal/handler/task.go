@@ -46,11 +46,14 @@ func (h *Handler) ListTasks(c *gin.Context) {
 			q = q.Where(k+" = ?", v)
 		}
 	}
+	if v := strings.TrimSpace(c.Query("excludeStatus")); v != "" {
+		q = q.Where("status NOT IN ?", strings.Split(v, ","))
+	}
 	if id := queryUint(c, "projectId"); id != nil {
 		q = q.Where("project_id = ?", *id)
 	}
 	if c.Query("overdue") == "1" {
-		q = q.Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled"})
+		q = q.Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled", "archived"})
 	}
 
 	var total int64
@@ -98,6 +101,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	views := make([]taskView, 0, len(items))
 	for _, t := range items {
 		v := taskView{Task: t, DueState: dueState(t.DueDate, t.RemindDays)}
+		v.No = taskNo(t.ID)
 		if t.ProjectID != nil {
 			v.ProjectName = projName[*t.ProjectID]
 		}
@@ -169,6 +173,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		serverErr(c, err)
 		return
 	}
+	t.No = taskNo(t.ID)
 	c.JSON(http.StatusCreated, t)
 }
 
@@ -211,12 +216,16 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 			updates[colName(f)] = v
 		}
 	}
-	// 完成时记录完成时间
+	// 完成时记录完成时间；归档保留原完成时间，恢复时也不重算
 	if s, ok := updates["status"].(string); ok {
-		if s == "done" {
-			now := time.Now()
-			updates["done_at"] = &now
-		} else if cur.Status == "done" {
+		switch {
+		case s == "done":
+			if cur.DoneAt == nil {
+				now := time.Now()
+				updates["done_at"] = &now
+			}
+		case s == "archived":
+		case cur.Status == "done":
 			updates["done_at"] = nil
 		}
 	}
@@ -227,6 +236,7 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 		}
 	}
 	h.DB.First(&cur, id)
+	cur.No = taskNo(cur.ID)
 	c.JSON(http.StatusOK, cur)
 }
 

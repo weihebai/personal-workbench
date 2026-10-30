@@ -222,7 +222,7 @@ export default function SettingsPage() {
 服务地址：${mcpUrl}
 鉴权请求头：Authorization: Bearer ${mcp.token}
 
-可用工具：list_projects、get_project、create_project、update_project、list_tasks、create_task、update_task、get_task_attachments（读取任务上的截图，AI 可直接看图）、list_reminders、create_reminder（到期提醒）。没有删除工具，删除请在网页里手动操作。
+可用工具：list_projects、get_project、create_project、update_project、list_tasks、create_task、update_task、get_task_attachments（读取任务上的截图，AI 可直接看图）、list_work_logs、create_work_log、update_work_log（记录/修改按工时计费项目的工时和工作内容）、list_reminders、create_reminder（到期提醒）。没有删除工具，删除请在网页里手动操作。
 
 mcpServers JSON 配置（适用于 Cursor / ZCode 等客户端）：
 {

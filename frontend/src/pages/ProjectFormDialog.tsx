@@ -15,6 +15,7 @@ import {
   PROJECT_STATUS,
   CLIENT_SOURCES,
   COMMISSION_TYPE,
+  BILLING_MODE,
 } from '@/lib/utils'
 import { useEscClose } from '@/lib/useEscClose'
 
@@ -32,6 +33,12 @@ const STATUS_OPTS: Option[] = Object.entries(PROJECT_STATUS).map(([v, d]) => ({
 const SUGGEST_TAGS = ['外包', '公司', '个人', '长期客户', '急件', '闲鱼', '小红书']
 
 const COMMISSION_OPTS: Option[] = Object.entries(COMMISSION_TYPE).map(([v, d]) => ({
+  value: v,
+  label: d.label,
+  dot: d.color,
+}))
+
+const BILLING_OPTS: Option[] = Object.entries(BILLING_MODE).map(([v, d]) => ({
   value: v,
   label: d.label,
   dot: d.color,
@@ -61,6 +68,8 @@ export function ProjectFormDialog({
     clientId: project?.clientId ? String(project.clientId) : '',
     quote: project?.quote ? String(project.quote) : '',
     cost: project?.cost ? String(project.cost) : '',
+    billingMode: (project?.billingMode || 'fixed') as 'fixed' | 'hourly',
+    hourlyRate: project?.hourlyRate ? String(project.hourlyRate) : '',
     // 老数据的 commissionType 可能是空字符串，统一回落到 none，避免下拉框显示空白
     commissionType: (project?.commissionType || 'none') as 'none' | 'pct' | 'fixed',
     commissionRate: project?.commissionRate ? String(project.commissionRate) : '',
@@ -113,6 +122,7 @@ export function ProjectFormDialog({
         clientId: form.clientId ? Number(form.clientId) : null,
         quote: Number(form.quote) || 0,
         cost: Number(form.cost) || 0,
+        hourlyRate: Number(form.hourlyRate) || 0,
         commissionRate: Number(form.commissionRate) || 0,
         estimateMinutes: Number(form.estimateMinutes) || 0,
         actualMinutes: Number(form.actualMinutes) || 0,
@@ -130,12 +140,14 @@ export function ProjectFormDialog({
     onError: (e) => setErr(errMsg(e)),
   })
 
+  const isCompany = form.kind === 'company'
+
   return (
     <Dialog
       open
       onClose={onClose}
       title={isEdit ? '编辑项目' : '新建项目'}
-      description="项目资料 + 资产索引 + 收入，一处维护"
+      description={isCompany ? '项目资料 + 资产索引，一处维护' : '项目资料 + 资产索引 + 收入，一处维护'}
       width="max-w-2xl"
       footer={
         <>
@@ -222,14 +234,30 @@ export function ProjectFormDialog({
           </div>
         </section>
 
-        {/* 收入与工期 */}
+        {/* 收入与工期：公司项目只记工时，不填金额 */}
         <section className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
-          <Field label="合同金额" hint="客户付的全款">
-            <Input value={form.quote} onChange={set('quote')} inputMode="decimal" placeholder="0" />
+          <Field label="计费方式">
+            <Select
+              value={form.billingMode}
+              onChange={(v) => setForm((f) => ({ ...f, billingMode: v as 'fixed' | 'hourly' }))}
+              options={BILLING_OPTS}
+            />
           </Field>
-          <Field label="成本" hint="你实际掏的钱：服务器/域名/认证/外包素材，不算自己的工时">
-            <Input value={form.cost} onChange={set('cost')} inputMode="decimal" placeholder="0" />
-          </Field>
+          {!isCompany &&
+            (form.billingMode === 'hourly' ? (
+              <Field label="时薪" hint="元/小时">
+                <Input value={form.hourlyRate} onChange={set('hourlyRate')} inputMode="decimal" placeholder="0" />
+              </Field>
+            ) : (
+              <Field label="合同金额" hint="客户付的全款">
+                <Input value={form.quote} onChange={set('quote')} inputMode="decimal" placeholder="0" />
+              </Field>
+            ))}
+          {!isCompany && (
+            <Field label="成本" hint="你实际掏的钱：服务器/域名/认证/外包素材，不算自己的工时">
+              <Input value={form.cost} onChange={set('cost')} inputMode="decimal" placeholder="0" />
+            </Field>
+          )}
           <Field label="开始日期">
             <DatePicker value={form.startDate} onChange={(v) => setForm((f) => ({ ...f, startDate: v }))} />
           </Field>
@@ -239,61 +267,75 @@ export function ProjectFormDialog({
           <Field label="预计工时" hint="分钟，60 = 1 小时">
             <Input value={form.estimateMinutes} onChange={set('estimateMinutes')} inputMode="numeric" />
           </Field>
-          <Field label="实际工时">
-            <Input value={form.actualMinutes} onChange={set('actualMinutes')} inputMode="numeric" />
-          </Field>
-        </section>
-
-        {/* 中介抽成 */}
-        <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
-          <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
-            <Percent size={12} /> 中介抽成
-            <span className="font-normal text-amber-600">有中介从中间接单、要抽走一部分时填这里</span>
-          </p>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
-            <Field label="抽成方式">
-              <Select
-                value={form.commissionType}
-                onChange={(v) => setForm((f) => ({ ...f, commissionType: v as any }))}
-                options={COMMISSION_OPTS}
-              />
+          {form.billingMode === 'fixed' && (
+            <Field label="实际工时">
+              <Input value={form.actualMinutes} onChange={set('actualMinutes')} inputMode="numeric" />
             </Field>
-            <Field
-              label={form.commissionType === 'fixed' ? '抽成金额' : '抽成比例'}
-              hint={form.commissionType === 'fixed' ? '元' : form.commissionType === 'pct' ? '%，如 20' : undefined}
-            >
-              <Input
-                value={form.commissionRate}
-                onChange={set('commissionRate')}
-                inputMode="decimal"
-                placeholder={form.commissionType === 'none' ? '—' : '0'}
-                disabled={form.commissionType === 'none'}
-                className={form.commissionType === 'none' ? 'bg-ink-50 text-ink-400' : ''}
-              />
-            </Field>
-            <Field label="中介 / 渠道" className="col-span-2">
-              <Input value={form.broker} onChange={set('broker')} placeholder="如：XX接单群、老李介绍" />
-            </Field>
-          </div>
-
-          {/* 实时预览：填完立刻看到到手多少 */}
-          {commitPreview && (
-            <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-white/80 px-2.5 py-2 text-[11px]">
-              <span className="text-ink-500">
-                合同 <b className="tabular text-ink-900">{money(commitPreview.quote)}</b>
-              </span>
-              <span className="text-ink-500">
-                抽成 <b className="tabular text-amber-600">-{money(commitPreview.commission)}</b>
-              </span>
-              <span className="text-ink-500">
-                你到手 <b className="tabular text-emerald-600">{money(commitPreview.net)}</b>
-              </span>
-              <span className="text-ink-400">
-                收款按 {money(commitPreview.net)} 记（填实际到账）
-              </span>
+          )}
+          {!isCompany && form.billingMode === 'hourly' && (
+            <div className="col-span-2 rounded-lg bg-cyan-50/60 px-2.5 py-2 text-[11px] leading-relaxed text-cyan-800 sm:col-span-3">
+              合同金额 = 累计工时 × 时薪，在项目详情页记录工时后自动更新；实际工时也由工时记录累计。
+            </div>
+          )}
+          {isCompany && form.billingMode === 'hourly' && (
+            <div className="col-span-2 rounded-lg bg-cyan-50/60 px-2.5 py-2 text-[11px] leading-relaxed text-cyan-800 sm:col-span-3">
+              在项目详情页记录工时，实际工时自动累计。
             </div>
           )}
         </section>
+
+        {/* 中介抽成 */}
+        {!isCompany && (
+          <section className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+            <p className="mb-2.5 flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+              <Percent size={12} /> 中介抽成
+              <span className="font-normal text-amber-600">有中介从中间接单、要抽走一部分时填这里</span>
+            </p>
+            <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-4">
+              <Field label="抽成方式">
+                <Select
+                  value={form.commissionType}
+                  onChange={(v) => setForm((f) => ({ ...f, commissionType: v as any }))}
+                  options={COMMISSION_OPTS}
+                />
+              </Field>
+              <Field
+                label={form.commissionType === 'fixed' ? '抽成金额' : '抽成比例'}
+                hint={form.commissionType === 'fixed' ? '元' : form.commissionType === 'pct' ? '%，如 20' : undefined}
+              >
+                <Input
+                  value={form.commissionRate}
+                  onChange={set('commissionRate')}
+                  inputMode="decimal"
+                  placeholder={form.commissionType === 'none' ? '—' : '0'}
+                  disabled={form.commissionType === 'none'}
+                  className={form.commissionType === 'none' ? 'bg-ink-50 text-ink-400' : ''}
+                />
+              </Field>
+              <Field label="中介 / 渠道" className="col-span-2">
+                <Input value={form.broker} onChange={set('broker')} placeholder="如：XX接单群、老李介绍" />
+              </Field>
+            </div>
+
+            {/* 实时预览：填完立刻看到到手多少 */}
+            {commitPreview && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-white/80 px-2.5 py-2 text-[11px]">
+                <span className="text-ink-500">
+                  合同 <b className="tabular text-ink-900">{money(commitPreview.quote)}</b>
+                </span>
+                <span className="text-ink-500">
+                  抽成 <b className="tabular text-amber-600">-{money(commitPreview.commission)}</b>
+                </span>
+                <span className="text-ink-500">
+                  你到手 <b className="tabular text-emerald-600">{money(commitPreview.net)}</b>
+                </span>
+                <span className="text-ink-400">
+                  收款按 {money(commitPreview.net)} 记（填实际到账）
+                </span>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* 标签 */}
         <Field label="标签">
