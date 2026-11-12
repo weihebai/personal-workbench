@@ -197,6 +197,14 @@ func main() {
 			authed.DELETE("/attachments/:id", h.DeleteAttachment)
 
 			authed.GET("/reminders", h.ListReminders)
+			authed.GET("/wechat-filing", h.ListFilingMonitors)
+			authed.POST("/wechat-filing", h.CreateFilingMonitor)
+			authed.PUT("/wechat-filing/:id", h.UpdateFilingMonitor)
+			authed.DELETE("/wechat-filing/:id", h.DeleteFilingMonitor)
+			authed.POST("/wechat-filing/:id/login", h.StartFilingLogin)
+			authed.GET("/wechat-filing/:id/login", h.PollFilingLogin)
+			authed.POST("/wechat-filing/:id/check", h.CheckFilingMonitor)
+			authed.POST("/wechat-filing/:id/session", h.ImportAliyunFilingSession)
 			authed.POST("/reminders", h.CreateReminder)
 			authed.PUT("/reminders/:id", h.UpdateReminder)
 			authed.DELETE("/reminders/:id", h.DeleteReminder)
@@ -327,6 +335,7 @@ func main() {
 	// 到期提醒邮件：启动时先查一次，之后每小时一次
 	notifyCtx, stopNotify := context.WithCancel(context.Background())
 	go h.RunReminderNotifier(notifyCtx)
+	go h.RunFilingMonitor(notifyCtx)
 
 	go func() {
 		log.Printf("服务启动: http://localhost%s", cfg.Addr)

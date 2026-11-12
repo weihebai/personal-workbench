@@ -596,7 +596,7 @@ func verifyBackupDB(path string, tables []string) error {
 		return err
 	}
 	for _, t := range tables {
-		if !have[t] {
+		if !have[t] && t != "filing_monitors" {
 			return fmt.Errorf("备份包缺少数据表 %s，备份与应用版本可能不匹配", t)
 		}
 	}
@@ -634,6 +634,18 @@ func (h *Handler) restoreDatabase(backupPath string, tables []string) (map[strin
 		}
 	}
 	for _, t := range tables {
+		if t == "filing_monitors" {
+			cols, err := tableColumns(restore, "_wbrestore", t)
+			if err != nil {
+				_, _ = restore.Exec("ROLLBACK")
+				detach()
+				return nil, err
+			}
+			if len(cols) == 0 {
+				counts[t] = 0
+				continue
+			}
+		}
 		n, err := copyTable(restore, t)
 		if err != nil {
 			_, _ = restore.Exec("ROLLBACK")

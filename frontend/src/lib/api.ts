@@ -43,6 +43,32 @@ export function errMsg(e: any, fallback = '操作失败') {
 
 /* ---------- 类型 ---------- */
 
+export interface FilingMonitor {
+  id: number
+  name: string
+  provider: 'wechat' | 'aliyun'
+  baOrderId: string
+  nodeId: string
+  title: string
+  progressInfo: string
+  projectId: number | null
+  enabled: boolean
+  sessionState: 'disconnected' | 'connected' | 'expired'
+  accountId: string
+  status: number | null
+  statusText: string
+  lastCheckedAt: string | null
+  lastSuccessAt: string | null
+  lastError: string
+  notificationError: string
+}
+
+export interface FilingLogin {
+  state: 'waiting' | 'scanned' | 'confirmed' | 'connected' | 'expired'
+  qrCode: string
+  expiresAt: string
+}
+
 export interface Paged<T> {
   items: T[]
   total: number

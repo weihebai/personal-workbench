@@ -18,6 +18,7 @@ import {
   CornerDownLeft,
   Eye,
   EyeOff,
+  ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/BrandMark'
@@ -32,13 +33,14 @@ const nav = [
   { to: '/tickets', label: '工单', icon: Ticket },
   { to: '/payments', label: '收款', icon: Wallet },
   { to: '/reminders', label: '到期提醒', short: '提醒', icon: BellRing },
+  { to: '/wechat-filing', label: '备案监控', short: '备案', icon: ShieldCheck },
   { to: '/ideas', label: '灵感记录', short: '灵感', icon: Lightbulb },
   { to: '/contents', label: '内容库', short: '内容', icon: LibraryBig },
   { to: '/clients', label: '客户', icon: Users },
 ]
 
 // 移动端底部 Tab：灵感是高频入口放进来；客户放进抽屉
-const mobileNav = nav.filter((n) => n.to !== '/clients')
+const mobileNav = nav.filter((n) => n.to !== '/clients' && n.to !== '/wechat-filing')
 
 export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)

@@ -13,6 +13,7 @@ import TasksPage from './pages/TasksPage'
 import TicketsPage from './pages/TicketsPage'
 import PaymentsPage from './pages/PaymentsPage'
 import RemindersPage from './pages/RemindersPage'
+import WechatFilingPage from './pages/WechatFilingPage'
 import IdeasPage from './pages/IdeasPage'
 import ContentsPage from './pages/ContentsPage'
 import ContentEditorPage from './pages/ContentEditorPage'
@@ -59,6 +60,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/reminders" element={<RemindersPage />} />
+            <Route path="/wechat-filing" element={<WechatFilingPage />} />
             <Route path="/ideas" element={<IdeasPage />} />
             <Route path="/contents" element={<ContentsPage />} />
             <Route path="/contents/new" element={<ContentEditorPage />} />

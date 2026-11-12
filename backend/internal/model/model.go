@@ -386,6 +386,6 @@ func AllModels() []any {
 		&User{}, &LoginAttempt{}, &Client{}, &Project{}, &Payment{}, &Task{},
 		&Reminder{}, &Milestone{}, &Tag{}, &Taggable{}, &Setting{}, &Idea{},
 		&Content{}, &Subtask{}, &Attachment{}, &WorkLog{},
-		&Ticket{}, &TicketMessage{},
+		&Ticket{}, &TicketMessage{}, &FilingMonitor{},
 	}
 }
