@@ -41,6 +41,15 @@ const (
 	backupUploadsPrefix = "uploads/"
 )
 
+func optionalBackupTable(table string) bool {
+	switch table {
+	case "filing_monitors", "work_logs":
+		return true
+	default:
+		return false
+	}
+}
+
 type backupManifest struct {
 	Version    int    `json:"version"`
 	App        string `json:"app"`
@@ -596,7 +605,7 @@ func verifyBackupDB(path string, tables []string) error {
 		return err
 	}
 	for _, t := range tables {
-		if !have[t] && t != "filing_monitors" {
+		if !have[t] && !optionalBackupTable(t) {
 			return fmt.Errorf("备份包缺少数据表 %s，备份与应用版本可能不匹配", t)
 		}
 	}
@@ -634,7 +643,7 @@ func (h *Handler) restoreDatabase(backupPath string, tables []string) (map[strin
 		}
 	}
 	for _, t := range tables {
-		if t == "filing_monitors" {
+		if optionalBackupTable(t) {
 			cols, err := tableColumns(restore, "_wbrestore", t)
 			if err != nil {
 				_, _ = restore.Exec("ROLLBACK")

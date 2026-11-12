@@ -350,6 +350,46 @@ func TestBackupRoundTrip(t *testing.T) {
 	}
 }
 
+func TestWorkLogTableDoesNotPreventRestoringOlderBackups(t *testing.T) {
+	source := newBackupTestHandler(t)
+	if err := source.DB.Migrator().DropTable(&model.WorkLog{}); err != nil {
+		t.Fatal(err)
+	}
+	target := newBackupTestHandler(t)
+	project := model.Project{Name: "被旧备份替换"}
+	if err := target.DB.Create(&project).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := target.DB.Create(&model.WorkLog{ProjectID: project.ID, WorkDate: time.Now(), Minutes: 60, Content: "需要清除的当前数据"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	tables, err := target.tableNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "older.db")
+	if err := source.DB.Exec("VACUUM INTO ?", backupPath).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupDB(backupPath, tables); err != nil {
+		t.Fatalf("backup missing the newer work_logs table was rejected: %v", err)
+	}
+	counts, err := target.restoreDatabase(backupPath, tables)
+	if err != nil {
+		t.Fatalf("restore failed: %v", err)
+	}
+	if counts["work_logs"] != 0 {
+		t.Fatalf("missing work_logs should be skipped, got %d", counts["work_logs"])
+	}
+	var count int64
+	if err := target.DB.Model(&model.WorkLog{}).Count(&count).Error; err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("current work logs should be cleared with the full restore, got %d", count)
+	}
+}
+
 // 二次导出再导入：以备份包为源再迁一次也应无损（幂等性抽查）
 func TestBackupRoundTripTwice(t *testing.T) {
 	h1 := newBackupTestHandler(t)
