@@ -19,6 +19,12 @@ type reminderView struct {
 
 func (h *Handler) ListReminders(c *gin.Context) {
 	q := h.DB.Model(&model.Reminder{})
+	archived := c.Query("archived")
+	if archived != "" && archived != "0" && archived != "1" {
+		badRequest(c, "归档筛选参数错误")
+		return
+	}
+	q = q.Where("archived = ?", archived == "1")
 	if s := c.Query("category"); s != "" {
 		q = q.Where("category = ?", s)
 	}
@@ -70,16 +76,16 @@ func (h *Handler) ListReminders(c *gin.Context) {
 }
 
 type reminderInput struct {
-	Title      string  `json:"title"`
-	Category   string  `json:"category"`
-	ProjectID  *uint   `json:"projectId"`
-	Target     string  `json:"target"`
-	ExpireAt   string  `json:"expireAt"`
-	RemindDays int     `json:"remindDays"`
-	Issuer     string  `json:"issuer"`
-	AutoRenew  bool    `json:"autoRenew"`
-	Enabled    *bool   `json:"enabled"`
-	Note       string  `json:"note"`
+	Title      string `json:"title"`
+	Category   string `json:"category"`
+	ProjectID  *uint  `json:"projectId"`
+	Target     string `json:"target"`
+	ExpireAt   string `json:"expireAt"`
+	RemindDays int    `json:"remindDays"`
+	Issuer     string `json:"issuer"`
+	AutoRenew  bool   `json:"autoRenew"`
+	Enabled    *bool  `json:"enabled"`
+	Note       string `json:"note"`
 }
 
 func (h *Handler) CreateReminder(c *gin.Context) {
@@ -151,6 +157,30 @@ func (h *Handler) UpdateReminder(c *gin.Context) {
 	}
 	h.DB.First(&cur, id)
 	c.JSON(http.StatusOK, cur)
+}
+
+func (h *Handler) ArchiveReminder(c *gin.Context) {
+	id, ok := paramUint(c, "id")
+	if !ok {
+		return
+	}
+	var in struct {
+		Archived *bool `json:"archived"`
+	}
+	if c.ShouldBindJSON(&in) != nil || in.Archived == nil {
+		badRequest(c, "请指定是否归档")
+		return
+	}
+	var reminder model.Reminder
+	if err := h.DB.First(&reminder, id).Error; err != nil {
+		notFound(c, "提醒不存在")
+		return
+	}
+	if err := h.DB.Model(&reminder).Update("archived", *in.Archived).Error; err != nil {
+		serverErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, reminder)
 }
 
 func (h *Handler) DeleteReminder(c *gin.Context) {

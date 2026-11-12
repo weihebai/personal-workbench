@@ -47,7 +47,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 
 	now := time.Now()
 	var reminders []model.Reminder
-	h.DB.Where("enabled = ?", true).Find(&reminders)
+	h.DB.Where("enabled = ? AND archived = ?", true, false).Find(&reminders)
 	for _, r := range reminders {
 		if now.After(r.ExpireAt) {
 			remindExpired++
@@ -135,7 +135,7 @@ func (h *Handler) Dashboard(c *gin.Context) {
 	h.fillPaymentProjectNames(pendingPayments)
 
 	soonReminders := []model.Reminder{}
-	h.DB.Where("enabled = ? AND expire_at <= ?", true, now.AddDate(0, 0, 30)).
+	h.DB.Where("enabled = ? AND archived = ? AND expire_at <= ?", true, false, now.AddDate(0, 0, 30)).
 		Order("expire_at ASC").Limit(10).Find(&soonReminders)
 
 	// 待跟进里程碑：临期或已过期的未完成节点

@@ -239,6 +239,7 @@ type Reminder struct {
 	AutoRenew bool `json:"autoRenew"`
 
 	Enabled bool   `gorm:"default:true" json:"enabled"`
+	Archived bool  `gorm:"not null;default:false" json:"archived"`
 	Note    string `gorm:"type:text" json:"note"`
 
 	// 邮件提醒发送日期（YYYY-MM-DD），同一天内不重复发送；不对外输出

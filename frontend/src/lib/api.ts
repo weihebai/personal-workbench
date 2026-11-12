@@ -219,6 +219,7 @@ export interface Reminder {
   issuer: string
   autoRenew: boolean
   enabled: boolean
+  archived: boolean
   note: string
   state?: 'normal' | 'soon' | 'expired'
   daysLeft?: number

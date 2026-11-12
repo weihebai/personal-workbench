@@ -82,7 +82,7 @@ func (h *Handler) Search(c *gin.Context) {
 		contents[i].TagList = splitTags(contents[i].Tags)
 	}
 	var reminders []model.Reminder
-	h.DB.Where("title LIKE ? OR target LIKE ?", like, like).Limit(8).Find(&reminders)
+	h.DB.Where("(title LIKE ? OR target LIKE ?) AND archived = ?", like, like, false).Limit(8).Find(&reminders)
 	var clients []model.Client
 	h.DB.Where("name LIKE ? OR contact LIKE ?", like, like).Limit(8).Find(&clients)
 	c.JSON(http.StatusOK, gin.H{

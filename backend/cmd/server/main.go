@@ -207,6 +207,7 @@ func main() {
 			authed.POST("/wechat-filing/:id/session", h.ImportAliyunFilingSession)
 			authed.POST("/reminders", h.CreateReminder)
 			authed.PUT("/reminders/:id", h.UpdateReminder)
+			authed.PATCH("/reminders/:id/archive", h.ArchiveReminder)
 			authed.DELETE("/reminders/:id", h.DeleteReminder)
 
 			authed.GET("/workdays/preview", h.PreviewMilestoneDue)

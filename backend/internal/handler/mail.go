@@ -246,7 +246,7 @@ func (h *Handler) notifyReminders(ctx context.Context) {
 	}
 
 	var items []model.Reminder
-	if err := h.DB.Where("enabled = ?", true).Order("expire_at ASC").Find(&items).Error; err != nil {
+	if err := h.DB.Where("enabled = ? AND archived = ?", true, false).Order("expire_at ASC").Find(&items).Error; err != nil {
 		log.Printf("提醒邮件：读取提醒失败: %v", err)
 		return
 	}
@@ -285,7 +285,7 @@ func dueReminders(items []model.Reminder, now time.Time) []model.Reminder {
 	today := now.Format("2006-01-02")
 	out := make([]model.Reminder, 0, len(items))
 	for _, r := range items {
-		if r.NotifiedOn == today {
+		if r.Archived || r.NotifiedOn == today {
 			continue
 		}
 		if now.After(r.ExpireAt) || now.AddDate(0, 0, r.RemindDays).After(r.ExpireAt) {

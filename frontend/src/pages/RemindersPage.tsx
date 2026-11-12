@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, BellRing, Pencil, Trash2, ShieldCheck, AlertTriangle, CircleCheck } from 'lucide-react'
-import { api, type Reminder, type Client, type Project } from '@/lib/api'
+import { Plus, BellRing, Pencil, Trash2, ShieldCheck, AlertTriangle, CircleCheck, Archive, ArchiveRestore } from 'lucide-react'
+import { api, errMsg, type Reminder } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Badge, Card, EmptyState, PageHeader, Skeleton } from '@/components/ui/Layout'
 import { cn, fmtDate, dictOf, REMINDER_CATEGORY } from '@/lib/utils'
@@ -9,18 +9,28 @@ import { ReminderFormDialog } from './ReminderFormDialog'
 
 export default function RemindersPage() {
   const [category, setCategory] = useState('')
+  const [archived, setArchived] = useState(false)
   const [editing, setEditing] = useState<Reminder | null | undefined>(undefined)
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['reminders', category],
-    queryFn: async () => (await api.get<{ items: Reminder[] }>('/reminders', { params: { category } })).data.items,
+    queryKey: ['reminders', category, archived],
+    queryFn: async () => (await api.get<{ items: Reminder[] }>('/reminders', { params: { category, archived: archived ? '1' : '0' } })).data.items,
   })
 
   const del = useMutation({
     mutationFn: async (id: number) => api.delete(`/reminders/${id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['reminders'] })
+      qc.invalidateQueries({ queryKey: ['dashboard'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
+    },
+  })
+  const archive = useMutation({
+    mutationFn: async (r: Reminder) => api.patch(`/reminders/${r.id}/archive`, { archived: !r.archived }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['reminders'] })
+      qc.invalidateQueries({ queryKey: ['project'] })
       qc.invalidateQueries({ queryKey: ['dashboard'] })
       qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
     },
@@ -42,7 +52,12 @@ export default function RemindersPage() {
         }
       />
 
-      <div className="mb-3 grid grid-cols-3 gap-2">
+      <div className="mb-3 flex gap-1.5">
+        <FilterChip active={!archived} onClick={() => setArchived(false)}>当前提醒</FilterChip>
+        <FilterChip active={archived} onClick={() => setArchived(true)}>已归档</FilterChip>
+      </div>
+      {archive.error && <p role="alert" className="mb-3 text-sm text-red-600">{errMsg(archive.error)}</p>}
+      {archived ? <p className="mb-3 text-xs text-ink-500">已归档提醒不参与到期统计和邮件通知，恢复后按原设置继续提醒。</p> : <div className="mb-3 grid grid-cols-3 gap-2">
         <StatTile
           icon={<AlertTriangle size={14} />}
           label="已过期"
@@ -51,7 +66,7 @@ export default function RemindersPage() {
         />
         <StatTile icon={<BellRing size={14} />} label="临近到期" value={soon} tone="amber" />
         <StatTile icon={<CircleCheck size={14} />} label="全部提醒" value={items.length} tone="ink" />
-      </div>
+      </div>}
 
       <div className="mb-3 flex flex-wrap gap-1.5">
         <FilterChip active={category === ''} onClick={() => setCategory('')}>
@@ -74,9 +89,9 @@ export default function RemindersPage() {
         <Card>
           <EmptyState
             icon={<ShieldCheck size={20} />}
-            title="没有到期提醒"
-            desc="客户服务器上的 SSL 证书、域名续费、服务器账单，都记在这里免得踩坑"
-            action={
+            title={archived ? '没有已归档提醒' : '没有到期提醒'}
+            desc={archived ? '不再使用的服务可以手动归档，保留记录供以后查看' : '客户服务器上的 SSL 证书、域名续费、服务器账单，都记在这里免得踩坑'}
+            action={archived ? undefined :
               <Button size="sm" onClick={() => setEditing(null)}>
                 <Plus size={14} /> 添加第一个提醒
               </Button>
@@ -109,9 +124,12 @@ export default function RemindersPage() {
                       )}
                     </div>
                   </div>
-                  <div className="flex shrink-0 gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
-                    <Button variant="ghost" size="icon" onClick={() => setEditing(r)}>
+                  <div className="flex shrink-0 gap-0.5">
+                    <Button variant="ghost" size="icon" aria-label={`编辑${r.title}`} onClick={() => setEditing(r)}>
                       <Pencil size={12} />
+                    </Button>
+                    <Button variant="ghost" size="icon" aria-label={`${r.archived ? '恢复' : '归档'}${r.title}`} title={r.archived ? '恢复提醒' : '归档提醒'} disabled={archive.isPending} onClick={() => archive.mutate(r)}>
+                      {r.archived ? <ArchiveRestore size={12} /> : <Archive size={12} />}
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => confirm('删除该提醒？') && del.mutate(r.id)}>
                       <Trash2 size={12} className="text-red-400" />

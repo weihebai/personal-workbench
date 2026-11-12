@@ -330,7 +330,7 @@ func (h *Handler) GetProject(c *gin.Context) {
 		}
 	}
 	var reminders []model.Reminder
-	h.DB.Where("project_id = ?", id).Order("expire_at ASC").Find(&reminders)
+	h.DB.Where("project_id = ? AND archived = ?", id, false).Order("expire_at ASC").Find(&reminders)
 
 	// 工时记录：按日期倒序，最近记的那条排最前
 	workLogs := []model.WorkLog{}
