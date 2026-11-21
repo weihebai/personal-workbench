@@ -41,13 +41,9 @@ const (
 	backupUploadsPrefix = "uploads/"
 )
 
-func optionalBackupTable(table string) bool {
-	switch table {
-	case "filing_monitors", "work_logs":
-		return true
-	default:
-		return false
-	}
+var requiredBackupTables = map[string]bool{
+	"users": true, "clients": true, "projects": true, "payments": true, "tasks": true,
+	"reminders": true, "milestones": true, "tags": true, "taggables": true, "settings": true,
 }
 
 type backupManifest struct {
@@ -574,7 +570,7 @@ func extractZipFile(f *zip.File, dst string) error {
 	return closeErr
 }
 
-// 只读打开备份库，确认是个能用的 SQLite，且业务表齐全
+// 只读打开备份库，确认是个能用的 SQLite，且最早版本的核心表齐全
 func verifyBackupDB(path string, tables []string) error {
 	db, err := sql.Open("sqlite", filepath.ToSlash(path)+"?_pragma=busy_timeout(2000)&_pragma=query_only(1)")
 	if err != nil {
@@ -605,7 +601,7 @@ func verifyBackupDB(path string, tables []string) error {
 		return err
 	}
 	for _, t := range tables {
-		if !have[t] && !optionalBackupTable(t) {
+		if !have[t] && requiredBackupTables[t] {
 			return fmt.Errorf("备份包缺少数据表 %s，备份与应用版本可能不匹配", t)
 		}
 	}
@@ -643,17 +639,15 @@ func (h *Handler) restoreDatabase(backupPath string, tables []string) (map[strin
 		}
 	}
 	for _, t := range tables {
-		if optionalBackupTable(t) {
-			cols, err := tableColumns(restore, "_wbrestore", t)
-			if err != nil {
-				_, _ = restore.Exec("ROLLBACK")
-				detach()
-				return nil, err
-			}
-			if len(cols) == 0 {
-				counts[t] = 0
-				continue
-			}
+		cols, err := tableColumns(restore, "_wbrestore", t)
+		if err != nil {
+			_, _ = restore.Exec("ROLLBACK")
+			detach()
+			return nil, err
+		}
+		if len(cols) == 0 {
+			counts[t] = 0
+			continue
 		}
 		n, err := copyTable(restore, t)
 		if err != nil {

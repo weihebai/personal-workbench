@@ -390,6 +390,67 @@ func TestWorkLogTableDoesNotPreventRestoringOlderBackups(t *testing.T) {
 	}
 }
 
+func TestTicketTablesDoNotPreventRestoringOlderBackups(t *testing.T) {
+	source := newBackupTestHandler(t)
+	if err := source.DB.Migrator().DropTable(&model.TicketMessage{}, &model.Ticket{}); err != nil {
+		t.Fatal(err)
+	}
+	target := newBackupTestHandler(t)
+	project := model.Project{Name: "旧版本项目"}
+	if err := target.DB.Create(&project).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := target.DB.Create(&model.Ticket{ProjectID: project.ID, Title: "当前库中的工单", Status: "pending"}).Error; err != nil {
+		t.Fatal(err)
+	}
+	tables, err := target.tableNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "before-tickets.db")
+	if err := source.DB.Exec("VACUUM INTO ?", backupPath).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupDB(backupPath, tables); err != nil {
+		t.Fatalf("backup missing tickets tables was rejected: %v", err)
+	}
+	counts, err := target.restoreDatabase(backupPath, tables)
+	if err != nil {
+		t.Fatalf("restore failed: %v", err)
+	}
+	for _, table := range []string{"tickets", "ticket_messages"} {
+		if counts[table] != 0 {
+			t.Fatalf("missing %s should be skipped, got %d", table, counts[table])
+		}
+	}
+	var ticketCount int64
+	if err := target.DB.Model(&model.Ticket{}).Count(&ticketCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if ticketCount != 0 {
+		t.Fatalf("current tickets should be cleared with the full restore, got %d", ticketCount)
+	}
+}
+
+func TestBackupStillRequiresCoreTables(t *testing.T) {
+	source := newBackupTestHandler(t)
+	if err := source.DB.Migrator().DropTable(&model.User{}); err != nil {
+		t.Fatal(err)
+	}
+	target := newBackupTestHandler(t)
+	tables, err := target.tableNames()
+	if err != nil {
+		t.Fatal(err)
+	}
+	backupPath := filepath.Join(t.TempDir(), "missing-users.db")
+	if err := source.DB.Exec("VACUUM INTO ?", backupPath).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyBackupDB(backupPath, tables); err == nil {
+		t.Fatal("backup without core users table was accepted")
+	}
+}
+
 // 二次导出再导入：以备份包为源再迁一次也应无损（幂等性抽查）
 func TestBackupRoundTripTwice(t *testing.T) {
 	h1 := newBackupTestHandler(t)
