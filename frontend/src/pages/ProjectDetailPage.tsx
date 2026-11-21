@@ -46,6 +46,7 @@ import { PaymentFormDialog } from './PaymentFormDialog'
 import { MilestoneFormDialog } from './MilestoneFormDialog'
 import { WorkLogFormDialog } from './WorkLogFormDialog'
 import { TaskFormDialog } from './TaskFormDialog'
+import { TaskQuickDialog } from './TaskQuickDialog'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { GitBranch as GitBranchIcon } from 'lucide-react'
 
@@ -77,6 +78,8 @@ export default function ProjectDetailPage() {
   const [logDialog, setLogDialog] = useState<WorkLog | null | undefined>(undefined)
   // undefined=关闭, null=新建（预填当前项目）, 对象=编辑
   const [taskDialog, setTaskDialog] = useState<Task | null | undefined>(undefined)
+  // 点任务时先开轻量面板，需要改更多字段再进完整编辑
+  const [quickTask, setQuickTask] = useState<Task | null>(null)
   const [quickTitle, setQuickTitle] = useState('')
   // 已完成/已取消默认收起，避免长列表把工作区撑开
   const [showClosed, setShowClosed] = useState(false)
@@ -297,7 +300,7 @@ export default function ProjectDetailPage() {
                   <TaskRow
                     key={t.id}
                     task={t}
-                    onEdit={() => setTaskDialog(t)}
+                    onEdit={() => setQuickTask(t)}
                     onAdvance={() => taskStatus.mutate({ tid: t.id, status: nextTaskStatus(t.status) })}
                     onDelete={() => confirm('删除任务「' + t.title + '」？') && delTask.mutate(t.id)}
                   />
@@ -319,7 +322,7 @@ export default function ProjectDetailPage() {
                   <TaskRow
                     key={t.id}
                     task={t}
-                    onEdit={() => setTaskDialog(t)}
+                    onEdit={() => setQuickTask(t)}
                     onAdvance={() => taskStatus.mutate({ tid: t.id, status: nextTaskStatus(t.status) })}
                     onDelete={() => confirm('删除任务「' + t.title + '」？') && delTask.mutate(t.id)}
                   />
@@ -776,6 +779,17 @@ export default function ProjectDetailPage() {
           log={logDialog}
           hourlyRate={p.hourlyRate}
           onClose={() => setLogDialog(undefined)}
+        />
+      )}
+      {quickTask && (
+        <TaskQuickDialog
+          task={quickTask}
+          onClose={() => setQuickTask(null)}
+          onEditFull={() => {
+            const t = quickTask
+            setQuickTask(null)
+            setTaskDialog(t)
+          }}
         />
       )}
       {taskDialog !== undefined && (
