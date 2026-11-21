@@ -22,6 +22,7 @@ import (
 	"personal-workbench/internal/database"
 	"personal-workbench/internal/handler"
 	"personal-workbench/internal/mcpbridge"
+	"personal-workbench/internal/model"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -278,7 +279,15 @@ func main() {
 	// MCP（Streamable HTTP）：AI 客户端连 https://<域名>/mcp，请求带
 	// Authorization: Bearer <令牌>。令牌在设置页生成（存设置表），MCP_TOKEN 环境变量兜底；
 	// 两者都没有时端点返回 401，等效关闭。
-	wb := mcpbridge.NewClient("http://127.0.0.1"+selfPort(cfg.Addr), cfg.AdminUser, cfg.AdminPass)
+	// 桥接访问 API 时用内部签发的管理员令牌：/mcp 入口已用 MCP 令牌鉴权，
+	// 再走账号密码登录会让「改了管理员密码」直接变成 401。
+	wb := mcpbridge.NewClientWithToken("http://127.0.0.1"+selfPort(cfg.Addr), func(context.Context) (string, error) {
+		var u model.User
+		if err := h.DB.Select("id", "username", "token_version").Order("id").First(&u).Error; err != nil {
+			return "", fmt.Errorf("找不到管理员账号: %w", err)
+		}
+		return mgr.Sign(u.ID, u.Username, u.TokenVersion)
+	})
 	server := mcp.NewServer(&mcp.Implementation{Name: "personal-workbench", Version: "0.1.0"}, nil)
 	mcpbridge.RegisterTools(server, wb)
 	mux := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, nil)

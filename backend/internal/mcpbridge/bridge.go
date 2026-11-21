@@ -23,12 +23,13 @@ import (
 
 // Client 工作台 API 的 HTTP 客户端
 type Client struct {
-	base  string
-	user  string
-	pass  string
-	http  *http.Client
-	mu    sync.Mutex
-	token string
+	base    string
+	user    string
+	pass    string
+	tokenFn func(context.Context) (string, error)
+	http    *http.Client
+	mu      sync.Mutex
+	token   string
 }
 
 func NewClient(base, user, pass string) *Client {
@@ -37,6 +38,17 @@ func NewClient(base, user, pass string) *Client {
 		user: user,
 		pass: pass,
 		http: &http.Client{Timeout: 15 * time.Second},
+	}
+}
+
+// NewClientWithToken 用内部令牌提供者鉴权，不再保存管理员密码。
+// 进程内挂载 /mcp 时用它：入口已用 MCP 令牌鉴权，桥接没必要再走一次
+// 账号密码登录，否则密码一改（数据库为准）桥接就会 401。
+func NewClientWithToken(base string, tokenFn func(context.Context) (string, error)) *Client {
+	return &Client{
+		base:    strings.TrimRight(base, "/"),
+		tokenFn: tokenFn,
+		http:    &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
@@ -55,12 +67,35 @@ func (c *Client) Login(ctx context.Context) error {
 	return nil
 }
 
-// do 发带鉴权的请求；401 时重登一次再试（JWT 默认 7 天过期）
+// refreshToken 换一个可用 token：内部模式走令牌提供者，本地 stdio 模式走密码登录。
+func (c *Client) refreshToken(ctx context.Context) error {
+	if c.tokenFn == nil {
+		return c.Login(ctx)
+	}
+	tok, err := c.tokenFn(ctx)
+	if err != nil {
+		return fmt.Errorf("签发工作台访问令牌失败: %w", err)
+	}
+	c.mu.Lock()
+	c.token = tok
+	c.mu.Unlock()
+	return nil
+}
+
+// do 发带鉴权的请求；401 时换一次 token 再试（JWT 默认 7 天过期）
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
+	c.mu.Lock()
+	t := c.token
+	c.mu.Unlock()
+	if t == "" {
+		if err := c.refreshToken(ctx); err != nil {
+			return fmt.Errorf("登录工作台失败: %w", err)
+		}
+	}
 	err := c.raw(ctx, method, path, body, out, true)
 	if err != nil && strings.Contains(err.Error(), "HTTP 401") {
-		if lerr := c.Login(ctx); lerr != nil {
-			return fmt.Errorf("登录工作台失败（检查账号密码与 WORKBENCH_URL）: %w", lerr)
+		if rerr := c.refreshToken(ctx); rerr != nil {
+			return fmt.Errorf("登录工作台失败: %w", rerr)
 		}
 		return c.raw(ctx, method, path, body, out, true)
 	}
