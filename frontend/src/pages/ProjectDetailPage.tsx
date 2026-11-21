@@ -825,9 +825,14 @@ function TaskRow({
   const ts = dictOf(TASK_STATUS, task.status)
   return (
     <div className="group flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-ink-50">
-      <button type="button" onClick={onEdit} className="flex min-w-0 flex-1 items-center gap-2 text-left">
-        <span className={cn('dot', ts.color)} />
-        <span className={cn('truncate text-xs', task.status === 'done' && 'text-ink-400 line-through')}>
+      <button type="button" onClick={onEdit} className="flex min-w-0 flex-1 items-start gap-2 text-left">
+        <span className={cn('dot mt-1', ts.color)} />
+        <span
+          className={cn(
+            'line-clamp-2 text-xs sm:line-clamp-1',
+            task.status === 'done' && 'text-ink-400 line-through',
+          )}
+        >
           {task.title}
         </span>
         {task.dueDate && <span className="shrink-0 text-[10px] text-ink-400">{fmtDate(task.dueDate)}</span>}
