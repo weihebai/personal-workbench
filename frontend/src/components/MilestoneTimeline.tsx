@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
@@ -23,10 +24,13 @@ export function MilestoneTimeline({
   items,
   onEdit,
   onAdd,
+  compact,
 }: {
   items: Milestone[]
   onEdit: (m: Milestone) => void
   onAdd: () => void
+  // 紧凑模式：默认只显示前两个未完成节点，其余折叠
+  compact?: boolean
 }) {
   const qc = useQueryClient()
 
@@ -53,6 +57,9 @@ export function MilestoneTimeline({
   const total = items.filter((m) => m.status !== 'canceled').length
   const done = items.filter((m) => m.status === 'done').length
   const pct = total ? Math.round((done / total) * 100) : 0
+  const [expanded, setExpanded] = useState(false)
+  const shownOpen = compact && !expanded ? open.slice(0, 2) : open
+  const hiddenOpen = open.length - shownOpen.length
 
   return (
     <div>
@@ -87,7 +94,7 @@ export function MilestoneTimeline({
           <span className="absolute bottom-2 left-[7px] top-2 w-px bg-[var(--border)]" aria-hidden />
         )}
         <ul className="space-y-0.5">
-          {[...open, ...closed].map((m) => {
+          {[...shownOpen, ...closed].map((m) => {
             const st = dictOf(MILESTONE_STATUS, m.status)
             const dl = m.dueDate ? daysUntil(m.dueDate) : null
             const isDone = m.status === 'done'
@@ -207,6 +214,23 @@ export function MilestoneTimeline({
             )
           })}
         </ul>
+
+        {hiddenOpen > 0 && (
+          <button
+            onClick={() => setExpanded(true)}
+            className="mt-1 w-full rounded px-1.5 py-1 text-left text-[10px] text-ink-400 hover:bg-ink-50 hover:text-ink-600"
+          >
+            还有 {hiddenOpen} 个未完成节点，展开
+          </button>
+        )}
+        {compact && expanded && open.length > 2 && (
+          <button
+            onClick={() => setExpanded(false)}
+            className="mt-1 w-full rounded px-1.5 py-1 text-left text-[10px] text-ink-400 hover:bg-ink-50 hover:text-ink-600"
+          >
+            收起
+          </button>
+        )}
       </div>
 
       {items.length > 0 && (
