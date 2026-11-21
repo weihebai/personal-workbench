@@ -9,7 +9,7 @@
 - 更新流程：
   1. 本地提交并推送 `main`；
   2. 等 Actions 构建完成，确认 GHCR 上的 `latest` 已包含这次提交；
-  3. 在服务器的 `/opt/workbench` 执行 `docker compose pull && docker compose up -d`；
+  3. 在服务器的 `/opt/workbench` 执行 `docker compose pull && docker compose up -d`。镜像走代理，拉取常超过 motty `terminal_exec` 的超时窗口，改用 `systemd-run --unit=wbdeploy --collect --property=StandardOutput=file:/tmp/wbdeploy.log /bin/sh /root/wbdeploy.sh` 脱离终端执行，再查 `/tmp/wbdeploy.done` 和镜像时间；
   4. 用 `docker compose logs --tail=50 workbench` 确认新容器启动正常。
 - 数据都在宿主机 `/opt/workbench/data`，换镜像不丢数据；涉及表结构变更时，先备份该目录。
 
