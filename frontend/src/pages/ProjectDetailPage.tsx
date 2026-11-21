@@ -230,7 +230,7 @@ export default function ProjectDetailPage() {
         <Button variant="ghost" size="icon" onClick={() => navigate('/projects')}>
           <ArrowLeft size={16} />
         </Button>
-        <h1 className="truncate text-base font-bold text-ink-900" data-private>
+        <h1 className="min-w-0 truncate text-base font-bold text-ink-900" data-private>
           {p.name}
         </h1>
         <Badge soft={kd.soft} dot={kd.color}>
@@ -257,8 +257,8 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 lg:grid-cols-3">
-        <div className="lg:col-span-2">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="min-w-0 lg:col-span-2">
       {/* ① 任务：项目里最高频的操作，放第一块 */}
       <Card padding={false}>
         <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
@@ -332,7 +332,7 @@ export default function ProjectDetailPage() {
         </div>
       </Card>
         </div>
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
 
       {/* ② 工时：按工时计费的项目，一键打卡，不用开对话框 */}
       {isHourly && (
@@ -369,6 +369,7 @@ export default function ProjectDetailPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-ink-400">
@@ -408,6 +409,7 @@ export default function ProjectDetailPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </Card>
       )}
@@ -469,6 +471,7 @@ export default function ProjectDetailPage() {
               />
             )
           ) : (
+            <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-[10px] uppercase tracking-wide text-ink-400">
@@ -534,6 +537,7 @@ export default function ProjectDetailPage() {
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </Card>
       )}
