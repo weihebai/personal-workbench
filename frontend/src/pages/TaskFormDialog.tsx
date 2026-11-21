@@ -15,10 +15,17 @@ import { AttachmentGallery } from './AttachmentGallery'
 export function TaskFormDialog({
   task,
   defaultProjectId,
+  defaultClientId,
+  defaultKind,
+  lockProject,
   onClose,
 }: {
   task: Task | null
   defaultProjectId?: number
+  defaultClientId?: number
+  defaultKind?: string
+  // 从项目页进来时，归属/项目/客户已经确定，不再让用户选
+  lockProject?: boolean
   onClose: () => void
 }) {
   const qc = useQueryClient()
@@ -28,10 +35,10 @@ export function TaskFormDialog({
     desc: task?.desc ?? '',
     acceptCriteria: task?.acceptCriteria ?? '',
     projectId: task?.projectId ? String(task.projectId) : defaultProjectId ? String(defaultProjectId) : '',
-    clientId: task?.clientId ? String(task.clientId) : '',
+    clientId: task?.clientId ? String(task.clientId) : defaultClientId ? String(defaultClientId) : '',
     status: task?.status ?? 'todo',
     priority: task?.priority ?? 'normal',
-    kind: task?.kind ?? 'freelance',
+    kind: task?.kind ?? defaultKind ?? 'freelance',
     dueDate: toDateInput(task?.dueDate),
     remindDays: String(task?.remindDays ?? 1),
     estimateMinutes: task?.estimateMinutes ? String(task.estimateMinutes) : '',
@@ -132,18 +139,24 @@ export function TaskFormDialog({
           <Input value={form.title} onChange={set('title')} placeholder="如：为客户制作企业官网首页" autoFocus />
         </Field>
         <div className="grid grid-cols-2 gap-x-3 gap-y-3">
-          <Field label="归属">
-            <Select value={form.kind} onChange={setV('kind')} options={kindOpts} />
-          </Field>
+          {!lockProject && (
+            <Field label="归属">
+              <Select value={form.kind} onChange={setV('kind')} options={kindOpts} />
+            </Field>
+          )}
           <Field label="优先级">
             <Select value={form.priority} onChange={setV('priority')} options={priorityOpts} />
           </Field>
-          <Field label="所属项目">
-            <Select value={form.projectId} onChange={setV('projectId')} options={projOpts} />
-          </Field>
-          <Field label="客户 / 委托方">
-            <Select value={form.clientId} onChange={setV('clientId')} options={clientOpts} />
-          </Field>
+          {!lockProject && (
+            <>
+              <Field label="所属项目">
+                <Select value={form.projectId} onChange={setV('projectId')} options={projOpts} />
+              </Field>
+              <Field label="客户 / 委托方">
+                <Select value={form.clientId} onChange={setV('clientId')} options={clientOpts} />
+              </Field>
+            </>
+          )}
           <Field label="状态">
             <Select value={form.status} onChange={setV('status')} options={statusOpts} />
           </Field>

@@ -776,6 +776,9 @@ export default function ProjectDetailPage() {
         <TaskFormDialog
           task={taskDialog}
           defaultProjectId={p.id}
+          defaultClientId={p.clientId ?? undefined}
+          defaultKind={p.kind === 'outsource' ? 'freelance' : p.kind}
+          lockProject
           onClose={() => setTaskDialog(undefined)}
         />
       )}
