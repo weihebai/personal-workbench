@@ -46,6 +46,7 @@ import { ProjectFormDialog } from './ProjectFormDialog'
 import { PaymentFormDialog } from './PaymentFormDialog'
 import { MilestoneFormDialog } from './MilestoneFormDialog'
 import { WorkLogFormDialog } from './WorkLogFormDialog'
+import { TaskFormDialog } from './TaskFormDialog'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { GitBranch as GitBranchIcon } from 'lucide-react'
 
@@ -75,6 +76,9 @@ export default function ProjectDetailPage() {
   // undefined=关闭, null=新建, 对象=编辑
   const [msDialog, setMsDialog] = useState<Milestone | null | undefined>(undefined)
   const [logDialog, setLogDialog] = useState<WorkLog | null | undefined>(undefined)
+  // undefined=关闭, null=新建（预填当前项目）, 对象=编辑
+  const [taskDialog, setTaskDialog] = useState<Task | null | undefined>(undefined)
+  const [quickTitle, setQuickTitle] = useState('')
 
   const { data, isLoading } = useQuery({
     queryKey: ['project', id],
@@ -128,6 +132,39 @@ export default function ProjectDetailPage() {
       qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
     },
   })
+
+  // 项目页是高频入口：输入标题回车即建任务，归属和客户自动带上
+  const quickAdd = useMutation({
+    mutationFn: async (title: string) =>
+      api.post('/tasks', {
+        title,
+        projectId: Number(id),
+        clientId: data?.project.clientId ?? null,
+        kind: data?.project.kind === 'outsource' ? 'freelance' : data?.project.kind,
+        status: 'todo',
+        priority: 'normal',
+      }),
+    onSuccess: taskListChanged,
+  })
+
+  // 点状态徽章直接推进，不进编辑框
+  const taskStatus = useMutation({
+    mutationFn: async ({ tid, status }: { tid: number; status: string }) =>
+      api.put(`/tasks/${tid}`, { status }),
+    onSuccess: taskListChanged,
+  })
+
+  const delTask = useMutation({
+    mutationFn: async (tid: number) => api.delete(`/tasks/${tid}`),
+    onSuccess: taskListChanged,
+  })
+
+  function taskListChanged() {
+    qc.invalidateQueries({ queryKey: ['project', id] })
+    qc.invalidateQueries({ queryKey: ['tasks'] })
+    qc.invalidateQueries({ queryKey: ['dashboard'] })
+    qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
+  }
 
   if (isLoading || !data) {
     return (
@@ -495,27 +532,61 @@ export default function ProjectDetailPage() {
       {/* 任务 + 提醒 */}
       <div className="grid gap-3 lg:grid-cols-2">
         <Card padding={false}>
-          <div className=" border-b border-[var(--border)] px-3 py-2">
+          <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
             <h3 className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
               <CheckCircle2 size={13} className="text-brand-500" /> 关联任务
               <span className="text-[10px] font-normal text-ink-400">({data.tasks.length})</span>
             </h3>
+            <Button size="sm" variant="outline" onClick={() => setTaskDialog(null)}>
+              <Plus size={13} /> 新建
+            </Button>
           </div>
           <div className="p-1.5">
+            <input
+              value={quickTitle}
+              onChange={(e) => setQuickTitle(e.target.value)}
+              onKeyDown={(e) => {
+                const title = quickTitle.trim()
+                if (e.key !== 'Enter' || !title) return
+                quickAdd.mutate(title)
+                setQuickTitle('')
+              }}
+              placeholder="＋ 输入任务标题，回车即添加"
+              className="mb-1 h-7 w-full rounded-md bg-ink-50/70 px-2 text-xs text-ink-800 outline-none placeholder:text-ink-400 focus:bg-white focus:ring-1 focus:ring-brand-300"
+            />
             {data.tasks.length === 0 ? (
-              <p className="py-5 text-center text-xs text-ink-400">还没有关联任务</p>
+              <p className="py-4 text-center text-xs text-ink-400">还没有关联任务</p>
             ) : (
               data.tasks.map((t) => {
                 const ts = dictOf(TASK_STATUS, t.status)
                 return (
-                  <div key={t.id} className="flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-ink-50">
-                    <span className={cn('dot', ts.color)} />
-                    <span className={cn('truncate text-xs', t.status === 'done' && 'text-ink-400 line-through')}>
-                      {t.title}
-                    </span>
-                    <Badge soft={ts.soft} className="ml-auto shrink-0">
-                      {ts.label}
-                    </Badge>
+                  <div key={t.id} className="group flex items-center gap-2 rounded-md px-1.5 py-1.5 hover:bg-ink-50">
+                    <button
+                      type="button"
+                      onClick={() => setTaskDialog(t)}
+                      className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                    >
+                      <span className={cn('dot', ts.color)} />
+                      <span className={cn('truncate text-xs', t.status === 'done' && 'text-ink-400 line-through')}>
+                        {t.title}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      title="点一下切换：待办 → 进行中 → 已完成"
+                      onClick={() => taskStatus.mutate({ tid: t.id, status: nextTaskStatus(t.status) })}
+                      className="shrink-0"
+                    >
+                      <Badge soft={ts.soft}>{ts.label}</Badge>
+                    </button>
+                    <button
+                      type="button"
+                      title="删除任务"
+                      onClick={() => confirm(`删除任务「${t.title}」？`) && delTask.mutate(t.id)}
+                      className="shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                    >
+                      <Trash2 size={12} className="text-ink-300 hover:text-red-500" />
+                    </button>
                   </div>
                 )
               })
@@ -634,8 +705,22 @@ export default function ProjectDetailPage() {
           onClose={() => setLogDialog(undefined)}
         />
       )}
+      {taskDialog !== undefined && (
+        <TaskFormDialog
+          task={taskDialog}
+          defaultProjectId={p.id}
+          onClose={() => setTaskDialog(undefined)}
+        />
+      )}
     </div>
   )
+}
+
+// 项目页点徽章推进状态：常用三步循环，待验收点一下算完成
+function nextTaskStatus(s: string) {
+  if (s === 'todo') return 'doing'
+  if (s === 'doing' || s === 'review') return 'done'
+  return 'todo'
 }
 
 // 本地时区的今天，YYYY-MM-DD，用作确认收货日的默认值

@@ -12,14 +12,22 @@ import { toDateInput } from '@/lib/utils'
 import { SubtaskList } from './SubtaskList'
 import { AttachmentGallery } from './AttachmentGallery'
 
-export function TaskFormDialog({ task, onClose }: { task: Task | null; onClose: () => void }) {
+export function TaskFormDialog({
+  task,
+  defaultProjectId,
+  onClose,
+}: {
+  task: Task | null
+  defaultProjectId?: number
+  onClose: () => void
+}) {
   const qc = useQueryClient()
   const isEdit = !!task
   const [form, setForm] = useState({
     title: task?.title ?? '',
     desc: task?.desc ?? '',
     acceptCriteria: task?.acceptCriteria ?? '',
-    projectId: task?.projectId ? String(task.projectId) : '',
+    projectId: task?.projectId ? String(task.projectId) : defaultProjectId ? String(defaultProjectId) : '',
     clientId: task?.clientId ? String(task.clientId) : '',
     status: task?.status ?? 'todo',
     priority: task?.priority ?? 'normal',
