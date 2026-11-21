@@ -254,6 +254,8 @@ export default function ProjectDetailPage() {
         </div>
       </div>
 
+      <div className="grid gap-3 lg:grid-cols-3">
+        <div className="lg:col-span-2">
       {/* ① 任务：项目里最高频的操作，放第一块 */}
       <Card padding={false}>
         <div className="flex items-center justify-between border-b border-[var(--border)] px-3 py-2">
@@ -326,6 +328,8 @@ export default function ProjectDetailPage() {
           )}
         </div>
       </Card>
+        </div>
+        <div className="space-y-3">
 
       {/* ② 工时：按工时计费的项目，一键打卡，不用开对话框 */}
       {isHourly && (
@@ -424,6 +428,8 @@ export default function ProjectDetailPage() {
           />
         </div>
       </Card>
+        </div>
+      </div>
 
       {/* ④ 收款：公司项目不走这里 */}
       {!isCompany && (

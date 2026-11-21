@@ -183,13 +183,13 @@ export function TaskFormDialog({
             </>
           )}
         </div>
-        {quickMode && !showMore && (
+        {quickMode && (
           <button
             type="button"
-            onClick={() => setShowMore(true)}
+            onClick={() => setShowMore((v) => !v)}
             className="text-[11px] text-ink-400 underline decoration-dotted hover:text-ink-600"
           >
-            更多选项：提醒、预算、工时、描述、验收标准、备注
+            {showMore ? '收起更多选项' : '更多选项：提醒、预算、工时、描述、验收标准、备注'}
           </button>
         )}
         {(!quickMode || showMore) && (
