@@ -47,6 +47,9 @@ export function TaskFormDialog({
     note: task?.note ?? '',
   })
   const [err, setErr] = useState('')
+  // 项目内新建：只留标题、优先级、状态、截止，其余收进「更多选项」
+  const quickMode = !!lockProject && !isEdit
+  const [showMore, setShowMore] = useState(false)
 
   const { data: projects } = useQuery({
     queryKey: ['projects-lite'],
@@ -163,19 +166,34 @@ export function TaskFormDialog({
           <Field label="截止日期">
             <DatePicker value={form.dueDate} onChange={setV('dueDate')} />
           </Field>
-          <Field label="提前提醒（天）">
-            <Input value={form.remindDays} onChange={set('remindDays')} inputMode="numeric" />
-          </Field>
-          <Field label="预算 / 报价">
-            <Input value={form.budget} onChange={set('budget')} inputMode="decimal" placeholder="0" />
-          </Field>
-          <Field label="预计工时" hint="分钟，60 = 1 小时">
-            <Input value={form.estimateMinutes} onChange={set('estimateMinutes')} inputMode="numeric" />
-          </Field>
-          <Field label="实际工时">
-            <Input value={form.actualMinutes} onChange={set('actualMinutes')} inputMode="numeric" />
-          </Field>
+          {(!quickMode || showMore) && (
+            <>
+              <Field label="提前提醒（天）">
+                <Input value={form.remindDays} onChange={set('remindDays')} inputMode="numeric" />
+              </Field>
+              <Field label="预算 / 报价">
+                <Input value={form.budget} onChange={set('budget')} inputMode="decimal" placeholder="0" />
+              </Field>
+              <Field label="预计工时" hint="分钟，60 = 1 小时">
+                <Input value={form.estimateMinutes} onChange={set('estimateMinutes')} inputMode="numeric" />
+              </Field>
+              <Field label="实际工时">
+                <Input value={form.actualMinutes} onChange={set('actualMinutes')} inputMode="numeric" />
+              </Field>
+            </>
+          )}
         </div>
+        {quickMode && !showMore && (
+          <button
+            type="button"
+            onClick={() => setShowMore(true)}
+            className="text-[11px] text-ink-400 underline decoration-dotted hover:text-ink-600"
+          >
+            更多选项：提醒、预算、工时、描述、验收标准、备注
+          </button>
+        )}
+        {(!quickMode || showMore) && (
+          <>
         <Field label="描述">
           <Textarea value={form.desc} onChange={set('desc')} rows={2} />
         </Field>
@@ -194,6 +212,8 @@ export function TaskFormDialog({
         <Field label="备注">
           <Textarea value={form.note} onChange={set('note')} rows={2} />
         </Field>
+          </>
+        )}
 
         {/* 步骤清单：新建时没有任务 id，存完才能挂步骤，所以只在编辑时出现 */}
         {isEdit && (
