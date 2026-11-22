@@ -349,7 +349,7 @@ export default function TasksPage() {
             <Home size={12} /> 生活
           </button>
         </div>
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
+        <div className="relative w-full sm:w-auto sm:flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
           <Input
             value={q}
