@@ -92,6 +92,7 @@ export function TaskFormDialog({
     { value: 'company', label: '公司任务' },
     { value: 'freelance', label: '私活任务' },
     { value: 'personal', label: '个人项目' },
+    { value: 'life', label: '生活' },
   ]
   const priorityOpts: Option[] = Object.entries(TASK_PRIORITY).map(([v, d]) => ({
     value: v,

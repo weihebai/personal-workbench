@@ -38,6 +38,7 @@ import {
   ChevronDown,
   Archive,
   ArchiveRestore,
+  Home,
 } from 'lucide-react'
 import { api, errMsg, type Paged, type Task, type Attachment } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -131,6 +132,8 @@ export default function TasksPage() {
   const [q, setQ] = useState('')
   const [priority, setPriority] = useState('')
   const [kind, setKind] = useState('')
+  // 项目任务 / 生活待办分开管理：生活类任务不挂在任何项目下
+  const [scope, setScope] = useState<'project' | 'life'>('project')
   const [view, setView] = useState<'board' | 'list' | 'archived'>('board')
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
@@ -142,13 +145,21 @@ export default function TasksPage() {
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', q, priority, kind],
+    queryKey: ['tasks', scope, q, priority, kind],
     queryFn: async () =>
       (
         await api.get<Paged<Task>>('/tasks', {
           // withSubtasks=1：卡片上要能直接展开勾选，一次把步骤带回来，
           // 比每张卡展开时再各发一个请求省事
-          params: { q, priority, kind, size: 200, sort: 'due', withSubtasks: 1, excludeStatus: 'archived' },
+          params: {
+            q,
+            priority,
+            ...(scope === 'life' ? { kind: 'life' } : { excludeKind: 'life', kind }),
+            size: 200,
+            sort: 'due',
+            withSubtasks: 1,
+            excludeStatus: 'archived',
+          },
         })
       ).data,
   })
@@ -300,16 +311,44 @@ export default function TasksPage() {
         desc={
           view === 'archived'
             ? `${archivedItems.length} 个已归档任务`
-            : `${items.length} 个任务${overdueCount ? ` · ${overdueCount} 个已逾期` : ''}`
+            : scope === 'life'
+              ? `${items.length} 个生活待办${overdueCount ? ` · ${overdueCount} 个已逾期` : ''}`
+              : `${items.length} 个任务${overdueCount ? ` · ${overdueCount} 个已逾期` : ''}`
         }
         actions={
           <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus size={14} /> 新建任务
+            <Plus size={14} /> {scope === 'life' ? '新建生活待办' : '新建任务'}
           </Button>
         }
       />
 
       <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 rounded-md border border-[var(--border)] bg-white p-0.5">
+          <button
+            onClick={() => {
+              setScope('project')
+              setKind('')
+            }}
+            className={cn(
+              'flex h-7 items-center gap-1 rounded px-2 text-[11px] font-medium',
+              scope === 'project' ? 'bg-ink-100 text-ink-900' : 'text-ink-400',
+            )}
+          >
+            <FolderKanban size={12} /> 项目
+          </button>
+          <button
+            onClick={() => {
+              setScope('life')
+              setKind('')
+            }}
+            className={cn(
+              'flex h-7 items-center gap-1 rounded px-2 text-[11px] font-medium',
+              scope === 'life' ? 'bg-ink-100 text-ink-900' : 'text-ink-400',
+            )}
+          >
+            <Home size={12} /> 生活
+          </button>
+        </div>
         <div className="relative min-w-0 flex-1 sm:max-w-xs">
           <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
           <Input
@@ -320,7 +359,9 @@ export default function TasksPage() {
           />
         </div>
         <Select value={priority} onChange={setPriority} options={PRIORITY_FILTER} size="sm" className="w-32" />
-        <Select value={kind} onChange={setKind} options={KIND_FILTER} size="sm" className="w-28" />
+        {scope === 'project' && (
+          <Select value={kind} onChange={setKind} options={KIND_FILTER} size="sm" className="w-28" />
+        )}
         <div className="ml-auto flex rounded-md border border-[var(--border)] bg-white p-0.5">
           <button
             onClick={() => setView('board')}
@@ -434,11 +475,15 @@ export default function TasksPage() {
         <Card>
           <EmptyState
             icon={<CheckSquare size={20} />}
-            title="还没有任务"
-            desc="把个人计划和客户交付分开管理，别让它们混在一起"
+            title={scope === 'life' ? '还没有生活待办' : '还没有任务'}
+            desc={
+              scope === 'life'
+                ? '买菜、体检、家里的杂事放这里，不掺进项目里'
+                : '把个人计划和客户交付分开管理，别让它们混在一起'
+            }
             action={
               <Button size="sm" onClick={() => setCreating(true)}>
-                <Plus size={14} /> 添加第一个任务
+                <Plus size={14} /> {scope === 'life' ? '添加第一个生活待办' : '添加第一个任务'}
               </Button>
             }
           />
@@ -633,6 +678,8 @@ export default function TasksPage() {
       {(creating || editing) && (
         <TaskFormDialog
           task={editing}
+          defaultKind={scope === 'life' ? 'life' : undefined}
+          lockProject={scope === 'life' || editing?.kind === 'life'}
           onClose={() => {
             setCreating(false)
             setEditing(null)

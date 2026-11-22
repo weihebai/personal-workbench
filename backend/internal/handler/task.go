@@ -46,6 +46,9 @@ func (h *Handler) ListTasks(c *gin.Context) {
 			q = q.Where(k+" = ?", v)
 		}
 	}
+	if v := strings.TrimSpace(c.Query("excludeKind")); v != "" {
+		q = q.Where("kind NOT IN ?", strings.Split(v, ","))
+	}
 	if v := strings.TrimSpace(c.Query("excludeStatus")); v != "" {
 		q = q.Where("status NOT IN ?", strings.Split(v, ","))
 	}
