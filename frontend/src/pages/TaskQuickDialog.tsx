@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Images, ListChecks } from 'lucide-react'
+import { Bell, Images, ListChecks } from 'lucide-react'
 import { api, type Task } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Badge, Dialog } from '@/components/ui/Layout'
@@ -12,6 +12,14 @@ const QUICK_STATUS: Task['status'][] = ['todo', 'doing', 'review', 'done']
 
 // 项目页点任务时的轻量面板：改标题、切状态、勾步骤、看图片都在这里完成，
 // 需要改截止日、预算这类字段再进「完整编辑」。
+function toDateTimeInput(v?: string | null) {
+  if (!v) return ''
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (x: number) => String(x).padStart(2, '0')
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
 export function TaskQuickDialog({
   task,
   onClose,
@@ -24,6 +32,7 @@ export function TaskQuickDialog({
   const qc = useQueryClient()
   const [title, setTitle] = useState(task.title)
   const [status, setStatus] = useState<Task['status']>(task.status)
+  const [remindAt, setRemindAt] = useState(toDateTimeInput(task.remindAt))
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['project'] })
@@ -101,6 +110,21 @@ export function TaskQuickDialog({
           {status === 'canceled' && <Badge soft={TASK_STATUS.canceled.soft}>已取消</Badge>}
           {status === 'archived' && <Badge soft={TASK_STATUS.archived.soft}>已归档</Badge>}
         </div>
+
+        {task.kind === 'life' && (
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--border)] px-2.5 py-2">
+            <Bell size={13} className="text-ink-400" />
+            <span className="text-xs font-medium text-ink-700">提醒时间</span>
+            <input
+              type="datetime-local"
+              value={remindAt}
+              onChange={(e) => setRemindAt(e.target.value)}
+              onBlur={() => patch.mutate({ remindAt })}
+              className="rounded-md bg-ink-50/70 px-2 py-1 text-xs text-ink-800 outline-none focus:bg-white focus:ring-1 focus:ring-brand-300"
+            />
+            <span className="text-[10px] text-ink-400">到点发邮件</span>
+          </div>
+        )}
 
         <div className="rounded-lg border border-[var(--border)] p-2.5">
           <div className="mb-1.5 flex items-center gap-1.5">

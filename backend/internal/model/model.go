@@ -155,6 +155,9 @@ type Task struct {
 	ActualMinutes   int       `json:"actualMinutes"`
 	Budget          float64   `json:"budget"`
 	DoneAt          *time.Time `json:"doneAt"`
+	// 提醒时间：到点发一封邮件（目前生活待办用）；NotifiedAt 记录最近一次发送时间，避免重复。
+	RemindAt   *time.Time `json:"remindAt"`
+	NotifiedAt *time.Time `json:"-"`
 	Note            string    `gorm:"type:text" json:"note"`
 
 	// 只读：子任务进度（不进数据库，查详情/列表时回填）

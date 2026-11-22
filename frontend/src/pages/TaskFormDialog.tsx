@@ -12,6 +12,15 @@ import { toDateInput } from '@/lib/utils'
 import { SubtaskList } from './SubtaskList'
 import { AttachmentGallery } from './AttachmentGallery'
 
+// datetime-local 需要 YYYY-MM-DDTHH:mm（本地时间）
+function toDateTimeInput(v?: string | null) {
+  if (!v) return ''
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (x: number) => String(x).padStart(2, '0')
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
+
 export function TaskFormDialog({
   task,
   defaultProjectId,
@@ -40,6 +49,7 @@ export function TaskFormDialog({
     priority: task?.priority ?? 'normal',
     kind: task?.kind ?? defaultKind ?? 'freelance',
     dueDate: toDateInput(task?.dueDate),
+    remindAt: toDateTimeInput(task?.remindAt),
     remindDays: String(task?.remindDays ?? 1),
     estimateMinutes: task?.estimateMinutes ? String(task.estimateMinutes) : '',
     actualMinutes: task?.actualMinutes ? String(task.actualMinutes) : '',
@@ -167,6 +177,11 @@ export function TaskFormDialog({
           <Field label="截止日期">
             <DatePicker value={form.dueDate} onChange={setV('dueDate')} />
           </Field>
+          {form.kind === 'life' && (
+            <Field label="提醒时间" hint="到点发邮件提醒，需在设置里开启邮件通知">
+              <Input type="datetime-local" value={form.remindAt} onChange={set('remindAt')} />
+            </Field>
+          )}
           {(!quickMode || showMore) && (
             <>
               <Field label="提前提醒（天）">

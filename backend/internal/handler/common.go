@@ -200,6 +200,20 @@ func paginated(items any, total int64, page, size int) gin.H {
 	}
 }
 
+// mustParseLocal 解析带时间的本地日期（datetime-local 提交的是 2006-01-02T15:04）。
+func mustParseLocal(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	layouts := []string{"2006-01-02T15:04", "2006-01-02T15:04:05", time.RFC3339, "2006-01-02"}
+	for _, l := range layouts {
+		if t, err := time.ParseInLocation(l, s, time.Local); err == nil {
+			return &t
+		}
+	}
+	return nil
+}
+
 func mustParseDate(s string) *time.Time {
 	if s == "" {
 		return nil

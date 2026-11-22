@@ -138,6 +138,7 @@ type taskInput struct {
 	Priority        string  `json:"priority"`
 	Kind            string  `json:"kind"`
 	DueDate         string  `json:"dueDate"`
+	RemindAt        string  `json:"remindAt"`
 	RemindDays      int     `json:"remindDays"`
 	EstimateMinutes int     `json:"estimateMinutes"`
 	ActualMinutes   int     `json:"actualMinutes"`
@@ -159,7 +160,7 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		Title: in.Title, Desc: in.Desc, AcceptCriteria: in.AcceptCriteria,
 		ProjectID: in.ProjectID, ClientID: in.ClientID,
 		Status: in.Status, Priority: in.Priority, Kind: in.Kind,
-		DueDate: mustParseDate(in.DueDate), RemindDays: in.RemindDays,
+		DueDate: mustParseDate(in.DueDate), RemindAt: mustParseLocal(in.RemindAt), RemindDays: in.RemindDays,
 		EstimateMinutes: in.EstimateMinutes, ActualMinutes: in.ActualMinutes,
 		Budget: in.Budget, Note: in.Note,
 	}
@@ -213,6 +214,12 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 	if v, ok := raw["dueDate"]; ok {
 		s, _ := v.(string)
 		updates["due_date"] = mustParseDate(s)
+	}
+	if v, ok := raw["remindAt"]; ok {
+		s, _ := v.(string)
+		updates["remind_at"] = mustParseLocal(s)
+		// 时间改了要重新提醒一次
+		updates["notified_at"] = nil
 	}
 	for _, f := range []string{"remindDays", "estimateMinutes", "actualMinutes", "budget"} {
 		if v, ok := raw[f]; ok {

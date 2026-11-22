@@ -224,6 +224,7 @@ func boolFlag(v bool) string {
 // RunReminderNotifier 启动后先检查一次，之后每小时检查。
 func (h *Handler) RunReminderNotifier(ctx context.Context) {
 	h.notifyReminders(ctx)
+	h.notifyTaskReminders(ctx)
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
 	for {
@@ -232,8 +233,60 @@ func (h *Handler) RunReminderNotifier(ctx context.Context) {
 			return
 		case <-ticker.C:
 			h.notifyReminders(ctx)
+			h.notifyTaskReminders(ctx)
 		}
 	}
+}
+
+// notifyTaskReminders 生活待办到点提醒：remind_at 已到、任务还没完成，且这个时间点没发过，就发一封邮件。
+func (h *Handler) notifyTaskReminders(ctx context.Context) {
+	if h.settingValue(smtpEnabledKey) != "1" {
+		return
+	}
+	cfg, ok := h.smtpConfig()
+	if !ok {
+		return
+	}
+
+	now := time.Now()
+	var items []model.Task
+	if err := h.DB.Where(
+		"kind = ? AND remind_at IS NOT NULL AND remind_at <= ? AND status NOT IN ?",
+		"life", now, []string{"done", "canceled", "archived"},
+	).Find(&items).Error; err != nil {
+		log.Printf("生活待办提醒：读取任务失败: %v", err)
+		return
+	}
+
+	due := make([]model.Task, 0, len(items))
+	for _, t := range items {
+		if t.NotifiedAt != nil && !t.NotifiedAt.Before(*t.RemindAt) {
+			continue
+		}
+		due = append(due, t)
+	}
+	if len(due) == 0 {
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString("到点的生活待办：\n\n")
+	for _, t := range due {
+		fmt.Fprintf(&b, "- %s（%s）\n", t.Title, t.RemindAt.Format("01-02 15:04"))
+	}
+	if err := notify.Send(cfg, fmt.Sprintf("生活待办提醒（%d 项）", len(due)), b.String()); err != nil {
+		log.Printf("生活待办提醒发送失败: %v", err)
+		return
+	}
+
+	ids := make([]uint, 0, len(due))
+	for _, t := range due {
+		ids = append(ids, t.ID)
+	}
+	if err := h.DB.Model(&model.Task{}).Where("id IN ?", ids).Update("notified_at", now).Error; err != nil {
+		log.Printf("生活待办提醒：更新发送记录失败: %v", err)
+	}
+	log.Printf("生活待办提醒已发送：%d 项", len(due))
 }
 
 func (h *Handler) notifyReminders(ctx context.Context) {

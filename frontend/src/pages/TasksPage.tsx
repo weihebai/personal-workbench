@@ -39,6 +39,7 @@ import {
   Archive,
   ArchiveRestore,
   Home,
+  Bell,
 } from 'lucide-react'
 import { api, errMsg, type Paged, type Task, type Attachment } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
@@ -78,6 +79,14 @@ const COLUMNS: { key: Task['status']; label: string; accent: string }[] = [
 ]
 
 const COLUMN_LABEL = Object.fromEntries(COLUMNS.map((c) => [c.key, c.label])) as Record<string, string>
+
+// 提醒时间显示成「01-02 15:04」，卡片上一眼看出什么时候提醒
+function fmtRemind(v: string) {
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (x: number) => String(x).padStart(2, '0')
+  return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes())
+}
 
 // 键盘拖拽默认每次只挪 25px，跨一列要按二十几下，等于没用。
 // 这里改成「左右（或上下）方向键直接跳到相邻列」，三次按键就能从待办拖到已完成。
@@ -922,6 +931,12 @@ function TaskCard({
           >
             {overdue || soon ? <Flame size={10} /> : <Clock size={10} />}
             {fmtDateShort(task.dueDate)}
+          </span>
+        )}
+        {task.remindAt && (
+          <span className="flex items-center gap-0.5 text-ink-400" title="提醒时间">
+            <Bell size={10} />
+            {fmtRemind(task.remindAt)}
           </span>
         )}
         {(task.estimateMinutes > 0 || task.actualMinutes > 0) && (

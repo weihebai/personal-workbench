@@ -166,6 +166,8 @@ export interface Task {
   /** 验收标准：一行一条，任务完成的判定依据。AI 完成后流转到 review 待人工验收 */
   acceptCriteria: string
   dueDate?: string | null
+  /** 生活待办的提醒时间（到点发邮件） */
+  remindAt?: string | null
   remindDays: number
   estimateMinutes: number
   actualMinutes: number
