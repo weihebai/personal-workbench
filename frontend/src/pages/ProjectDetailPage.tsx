@@ -47,6 +47,7 @@ import { MilestoneFormDialog } from './MilestoneFormDialog'
 import { WorkLogFormDialog } from './WorkLogFormDialog'
 import { TaskFormDialog } from './TaskFormDialog'
 import { TaskQuickDialog } from './TaskQuickDialog'
+import { TaskCompleteDialog } from '@/components/TaskCompleteDialog'
 import { MilestoneTimeline } from '@/components/MilestoneTimeline'
 import { GitBranch as GitBranchIcon } from 'lucide-react'
 
@@ -80,6 +81,8 @@ export default function ProjectDetailPage() {
   const [taskDialog, setTaskDialog] = useState<Task | null | undefined>(undefined)
   // 点任务时先开轻量面板，需要改更多字段再进完整编辑
   const [quickTask, setQuickTask] = useState<Task | null>(null)
+  // 推进到已完成且填过预计工时时，先问实际用了多久
+  const [completeTask, setCompleteTask] = useState<Task | null>(null)
   const [quickTitle, setQuickTitle] = useState('')
   // 已完成/已取消默认收起，避免长列表把工作区撑开
   const [showClosed, setShowClosed] = useState(false)
@@ -164,8 +167,8 @@ export default function ProjectDetailPage() {
 
   // 点状态徽章直接推进，不进编辑框
   const taskStatus = useMutation({
-    mutationFn: async ({ tid, status }: { tid: number; status: string }) =>
-      api.put('/tasks/' + tid, { status }),
+    mutationFn: async ({ tid, ...body }: { tid: number } & Record<string, unknown>) =>
+      api.put('/tasks/' + tid, body),
     onSuccess: taskListChanged,
   })
 
@@ -301,7 +304,14 @@ export default function ProjectDetailPage() {
                     key={t.id}
                     task={t}
                     onEdit={() => setQuickTask(t)}
-                    onAdvance={() => taskStatus.mutate({ tid: t.id, status: nextTaskStatus(t.status) })}
+                    onAdvance={() => {
+                      const next = nextTaskStatus(t.status)
+                      if (next === 'done' && (t.estimateMinutes ?? 0) > 0 && !(t.actualMinutes ?? 0)) {
+                        setCompleteTask(t)
+                        return
+                      }
+                      taskStatus.mutate({ tid: t.id, status: next })
+                    }}
                     onDelete={() => confirm('删除任务「' + t.title + '」？') && delTask.mutate(t.id)}
                   />
                 ))}
@@ -323,7 +333,14 @@ export default function ProjectDetailPage() {
                     key={t.id}
                     task={t}
                     onEdit={() => setQuickTask(t)}
-                    onAdvance={() => taskStatus.mutate({ tid: t.id, status: nextTaskStatus(t.status) })}
+                    onAdvance={() => {
+                      const next = nextTaskStatus(t.status)
+                      if (next === 'done' && (t.estimateMinutes ?? 0) > 0 && !(t.actualMinutes ?? 0)) {
+                        setCompleteTask(t)
+                        return
+                      }
+                      taskStatus.mutate({ tid: t.id, status: next })
+                    }}
                     onDelete={() => confirm('删除任务「' + t.title + '」？') && delTask.mutate(t.id)}
                   />
                 ))}
@@ -783,6 +800,16 @@ export default function ProjectDetailPage() {
           log={logDialog}
           hourlyRate={p.hourlyRate}
           onClose={() => setLogDialog(undefined)}
+        />
+      )}
+      {completeTask && (
+        <TaskCompleteDialog
+          task={completeTask}
+          onClose={() => setCompleteTask(null)}
+          onConfirm={(m) => {
+            taskStatus.mutate({ tid: completeTask.id, status: 'done', actualMinutes: m })
+            setCompleteTask(null)
+          }}
         />
       )}
       {quickTask && (

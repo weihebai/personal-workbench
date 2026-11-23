@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ListChecks, Images } from 'lucide-react'
-import { api, errMsg, type Client, type Project, type Task } from '@/lib/api'
+import { api, errMsg, type Project, type Task } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Field, Input, Textarea } from '@/components/ui/Input'
 import { Select, type Option } from '@/components/ui/Select'
@@ -65,11 +65,6 @@ export function TaskFormDialog({
     queryKey: ['projects-lite'],
     queryFn: async () => (await api.get<{ items: Project[] }>('/projects', { params: { size: 200 } })).data.items,
   })
-  const { data: clients } = useQuery({
-    queryKey: ['clients'],
-    queryFn: async () => (await api.get<{ items: Client[] }>('/clients')).data.items,
-  })
-
   const save = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -118,10 +113,6 @@ export function TaskFormDialog({
     { value: '', label: '不关联项目' },
     ...(projects ?? []).map((p) => ({ value: String(p.id), label: p.name })),
   ]
-  const clientOpts: Option[] = [
-    { value: '', label: '不关联客户' },
-    ...(clients ?? []).map((c) => ({ value: String(c.id), label: c.name, hint: c.source || undefined })),
-  ]
 
   return (
     <Dialog
@@ -162,18 +153,27 @@ export function TaskFormDialog({
             <Select value={form.priority} onChange={setV('priority')} options={priorityOpts} />
           </Field>
           {!lockProject && (
-            <>
-              <Field label="所属项目">
-                <Select value={form.projectId} onChange={setV('projectId')} options={projOpts} />
-              </Field>
-              <Field label="客户 / 委托方">
-                <Select value={form.clientId} onChange={setV('clientId')} options={clientOpts} />
-              </Field>
-            </>
+            <Field label="所属项目">
+              <Select
+                value={form.projectId}
+                onChange={(v) => {
+                  // 选了项目就默认带上项目绑定的客户，不再单独让用户选
+                  const proj = (projects ?? []).find((p) => String(p.id) === v)
+                  setForm((f) => ({
+                    ...f,
+                    projectId: v,
+                    clientId: proj?.clientId ? String(proj.clientId) : '',
+                  }))
+                }}
+                options={projOpts}
+              />
+            </Field>
           )}
-          <Field label="状态">
-            <Select value={form.status} onChange={setV('status')} options={statusOpts} />
-          </Field>
+          {isEdit && (
+            <Field label="状态">
+              <Select value={form.status} onChange={setV('status')} options={statusOpts} />
+            </Field>
+          )}
           <Field label="截止日期">
             <DatePicker value={form.dueDate} onChange={setV('dueDate')} />
           </Field>
@@ -184,17 +184,13 @@ export function TaskFormDialog({
           )}
           {(!quickMode || showMore) && (
             <>
-              <Field label="提前提醒（天）">
-                <Input value={form.remindDays} onChange={set('remindDays')} inputMode="numeric" />
-              </Field>
-              <Field label="预算 / 报价">
-                <Input value={form.budget} onChange={set('budget')} inputMode="decimal" placeholder="0" />
-              </Field>
-              <Field label="预计工时" hint="分钟，60 = 1 小时">
+              {form.dueDate && (
+                <Field label="提前提醒（天）">
+                  <Input value={form.remindDays} onChange={set('remindDays')} inputMode="numeric" />
+                </Field>
+              )}
+              <Field label="预计工时" hint="分钟，60 = 1 小时；完成时会对照着记录实际用了多久">
                 <Input value={form.estimateMinutes} onChange={set('estimateMinutes')} inputMode="numeric" />
-              </Field>
-              <Field label="实际工时">
-                <Input value={form.actualMinutes} onChange={set('actualMinutes')} inputMode="numeric" />
               </Field>
             </>
           )}
@@ -205,7 +201,7 @@ export function TaskFormDialog({
             onClick={() => setShowMore((v) => !v)}
             className="text-[11px] text-ink-400 underline decoration-dotted hover:text-ink-600"
           >
-            {showMore ? '收起更多选项' : '更多选项：提醒、预算、工时、描述、验收标准、备注'}
+            {showMore ? '收起更多选项' : '更多选项：提前提醒、工时、描述、验收标准、备注'}
           </button>
         )}
         {(!quickMode || showMore) && (

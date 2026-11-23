@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Badge, Dialog } from '@/components/ui/Layout'
 import { TASK_STATUS, cn } from '@/lib/utils'
 import { SubtaskList } from './SubtaskList'
+import { TaskCompleteDialog } from '@/components/TaskCompleteDialog'
 import { AttachmentGallery } from './AttachmentGallery'
 
 const QUICK_STATUS: Task['status'][] = ['todo', 'doing', 'review', 'done']
@@ -33,6 +34,7 @@ export function TaskQuickDialog({
   const [title, setTitle] = useState(task.title)
   const [status, setStatus] = useState<Task['status']>(task.status)
   const [remindAt, setRemindAt] = useState(toDateTimeInput(task.remindAt))
+  const [askMinutes, setAskMinutes] = useState(false)
 
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ['project'] })
@@ -57,6 +59,10 @@ export function TaskQuickDialog({
 
   const pickStatus = (s: Task['status']) => {
     if (s === status) return
+    if (s === 'done' && (task.estimateMinutes ?? 0) > 0 && !(task.actualMinutes ?? 0)) {
+      setAskMinutes(true)
+      return
+    }
     setStatus(s)
     patch.mutate({ status: s })
   }
@@ -144,6 +150,18 @@ export function TaskQuickDialog({
           <AttachmentGallery taskId={task.id} enablePaste />
         </div>
       </div>
+
+      {askMinutes && (
+        <TaskCompleteDialog
+          task={task}
+          onClose={() => setAskMinutes(false)}
+          onConfirm={(m) => {
+            setStatus('done')
+            patch.mutate({ status: 'done', actualMinutes: m })
+            setAskMinutes(false)
+          }}
+        />
+      )}
     </Dialog>
   )
 }

@@ -56,6 +56,7 @@ import {
   TASK_PRIORITY,
 } from '@/lib/utils'
 import { TaskFormDialog } from './TaskFormDialog'
+import { TaskCompleteDialog } from '@/components/TaskCompleteDialog'
 import { TaskSteps, StepsToggle } from './TaskSteps'
 
 const PRIORITY_FILTER: Option[] = [
@@ -146,6 +147,8 @@ export default function TasksPage() {
   const [view, setView] = useState<'board' | 'list' | 'archived'>('board')
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
+  // 勾选完成时，如果填过预计工时，先问一句实际用了多久
+  const [completing, setCompleting] = useState<Task | null>(null)
   const [activeId, setActiveId] = useState<number | null>(null)
   // 哪几张卡的步骤是展开的。默认收起，避免看板被步骤撑得太长。
   const [openSteps, setOpenSteps] = useState<Set<number>>(new Set())
@@ -192,6 +195,16 @@ export default function TasksPage() {
       qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
     },
   })
+
+  // 完成/取消完成：填过预计工时且还没记实际工时的，弹窗问一下
+  const toggleDone = (t: Task) => {
+    const toDone = t.status !== 'done'
+    if (toDone && (t.estimateMinutes ?? 0) > 0 && !(t.actualMinutes ?? 0)) {
+      setCompleting(t)
+      return
+    }
+    patch.mutate({ id: t.id, body: { status: toDone ? 'done' : 'todo' } })
+  }
 
   const del = useMutation({
     mutationFn: async (id: number) => api.delete(`/tasks/${id}`),
@@ -265,7 +278,7 @@ export default function TasksPage() {
             {
               label: t.status === 'done' ? '标记为未完成' : '标记为已完成',
               icon: <CheckSquare size={12} />,
-              onClick: () => patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } }),
+              onClick: () => toggleDone(t),
             },
             ...COLUMNS.filter((c) => c.key !== t.status && c.key !== 'done').map((c) => ({
               label: `移到「${c.label}」`,
@@ -516,7 +529,7 @@ export default function TasksPage() {
                     stepsOpen={openSteps.has(t.id)}
                     onToggleSteps={() => toggleSteps(t.id)}
                     onToggle={() =>
-                      patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
+                      toggleDone(t)
                     }
                     onEdit={() => setEditing(t)}
                     onArchive={() => patch.mutate({ id: t.id, body: { status: 'archived' } })}
@@ -579,7 +592,7 @@ export default function TasksPage() {
                             type="checkbox"
                             checked={t.status === 'done'}
                             onChange={() =>
-                              patch.mutate({ id: t.id, body: { status: t.status === 'done' ? 'todo' : 'done' } })
+                              toggleDone(t)
                             }
                             className="h-3.5 w-3.5 accent-emerald-500"
                           />
@@ -692,6 +705,17 @@ export default function TasksPage() {
           onClose={() => {
             setCreating(false)
             setEditing(null)
+          }}
+        />
+      )}
+
+      {completing && (
+        <TaskCompleteDialog
+          task={completing}
+          onClose={() => setCompleting(null)}
+          onConfirm={(m) => {
+            patch.mutate({ id: completing.id, body: { status: 'done', actualMinutes: m } })
+            setCompleting(null)
           }}
         />
       )}
