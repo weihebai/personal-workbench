@@ -57,8 +57,8 @@ export function TaskFormDialog({
     note: task?.note ?? '',
   })
   const [err, setErr] = useState('')
-  // 项目内新建：只留标题、优先级、状态、截止，其余收进「更多选项」
-  const quickMode = !!lockProject && !isEdit
+  // 新建时只留必用字段，其余收进「更多选项」；编辑时展开完整表单
+  const quickMode = !isEdit
   const [showMore, setShowMore] = useState(false)
 
   const { data: projects } = useQuery({

@@ -14,9 +14,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': { target: 'http://127.0.0.1:8080', changeOrigin: true },
+      // 本地调试时可以指向线上：VITE_API_TARGET=http://39.107.50.150:9096
+      '/api': { target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8080', changeOrigin: true },
       // MCP 端点也走代理：设置页生成的连接地址用的是当前访问的 origin（5173）
-      '/mcp': { target: 'http://127.0.0.1:8080', changeOrigin: true },
+      '/mcp': { target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8080', changeOrigin: true },
     },
   },
   build: { outDir: 'dist', sourcemap: false },

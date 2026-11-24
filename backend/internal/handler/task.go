@@ -29,7 +29,7 @@ func dueState(t *time.Time, remindDays int) string {
 
 type taskView struct {
 	model.Task
-	DueState  string `json:"dueState"`
+	DueState    string `json:"dueState"`
 	ProjectName string `json:"projectName"`
 	ClientName  string `json:"clientName"`
 }
@@ -199,7 +199,7 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
-	strFields := map[string]string{"title": "title", "desc": "desc", "status": "status", "priority": "priority", "kind": "kind", "note": "note", "acceptCriteria": "accept_criteria"}
+	strFields := map[string]string{"title": "title", "desc": "desc", "status": "status", "priority": "priority", "kind": "kind", "note": "note", "acceptCriteria": "accept_criteria", "executor": "executor", "sessionId": "session_id", "runState": "run_state", "repoPath": "repo_path"}
 	for js, col := range strFields {
 		if v, ok := raw[js]; ok {
 			updates[col] = v
@@ -234,6 +234,10 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 				now := time.Now()
 				updates["done_at"] = &now
 			}
+		case s == "doing", s == "review":
+			// 领取或提交时刷新最近运行时间，供插件显示「多久前处理」。
+			now := time.Now()
+			updates["last_run_at"] = &now
 		case s == "archived":
 		case cur.Status == "done":
 			updates["done_at"] = nil

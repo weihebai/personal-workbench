@@ -88,9 +88,9 @@ type Project struct {
 	FeedbackToken *string `gorm:"size:64;uniqueIndex" json:"feedbackToken,omitempty"`
 
 	// 只读聚合字段（查询时填充，不落库）
-	Received float64  `gorm:"-" json:"received"`
-	TagList  []string `gorm:"-" json:"tags"`
-	FeedbackPath string `gorm:"-" json:"feedbackPath,omitempty"`
+	Received     float64  `gorm:"-" json:"received"`
+	TagList      []string `gorm:"-" json:"tags"`
+	FeedbackPath string   `gorm:"-" json:"feedbackPath,omitempty"`
 
 	// 抽成与净收入（只读，由 Quote/CommissionType/CommissionRate 推算）
 	Commission float64 `gorm:"-" json:"commission"` // 抽成金额
@@ -128,42 +128,54 @@ type Payment struct {
 	Note        string     `gorm:"size:512" json:"note"`
 
 	// 只读派生字段：由后端算出来，前端不用自己判断
-	Overdue  bool       `gorm:"-" json:"overdue"`
-	DaysLate int        `gorm:"-" json:"daysLate"`
-	DueDate  *time.Time `gorm:"-" json:"dueDate"` // 生效到期日：约定日，没填则按确认收货+账期推
-	ProjectName string  `gorm:"-" json:"projectName"`
+	Overdue     bool       `gorm:"-" json:"overdue"`
+	DaysLate    int        `gorm:"-" json:"daysLate"`
+	DueDate     *time.Time `gorm:"-" json:"dueDate"` // 生效到期日：约定日，没填则按确认收货+账期推
+	ProjectName string     `gorm:"-" json:"projectName"`
 }
 
 // 任务
 type Task struct {
 	Base
-	Title    string `gorm:"size:255;not null;index" json:"title"`
-	Desc     string `gorm:"type:text" json:"desc"`
+	Title string `gorm:"size:255;not null;index" json:"title"`
+	Desc  string `gorm:"type:text" json:"desc"`
 	// 验收标准：任务完成的判定依据，一行一条。AI 完成后只流转到 review，
 	// 人工对着这里逐条实测通过才算 done。
 	AcceptCriteria string `gorm:"type:text" json:"acceptCriteria"`
-	ProjectID *uint `gorm:"index" json:"projectId"`
-	ClientID  *uint `gorm:"index" json:"clientId"`
+	ProjectID      *uint  `gorm:"index" json:"projectId"`
+	ClientID       *uint  `gorm:"index" json:"clientId"`
 
 	Status   string `gorm:"size:16;index" json:"status"`   // todo 待办 / doing 进行中 / review 待验收 / done 已完成 / canceled 已取消 / archived 已归档
 	Priority string `gorm:"size:16;index" json:"priority"` // low 低 / normal 普通 / high 高 / urgent 紧急
 	Kind     string `gorm:"size:16;index" json:"kind"`     // company 公司 / personal 个人 / freelance 私活
 
-	DueDate        *time.Time `json:"dueDate"`
-	RemindDays     int        `json:"remindDays"` // 提前提醒天数
-	EstimateMinutes int       `json:"estimateMinutes"`
-	ActualMinutes   int       `json:"actualMinutes"`
-	Budget          float64   `json:"budget"`
+	DueDate         *time.Time `json:"dueDate"`
+	RemindDays      int        `json:"remindDays"` // 提前提醒天数
+	EstimateMinutes int        `json:"estimateMinutes"`
+	ActualMinutes   int        `json:"actualMinutes"`
+	Budget          float64    `json:"budget"`
 	DoneAt          *time.Time `json:"doneAt"`
 	// 提醒时间：到点发一封邮件（目前生活待办用）；NotifiedAt 记录最近一次发送时间，避免重复。
 	RemindAt   *time.Time `json:"remindAt"`
 	NotifiedAt *time.Time `json:"-"`
-	Note            string    `gorm:"type:text" json:"note"`
+	Note       string     `gorm:"type:text" json:"note"`
+
+	// 执行来源与运行状态：供工作台插件回显「领取 / 打开会话 / 重新运行」。
+	// executor 为空表示人工处理；dsh 表示由 DSH 会话执行。
+	Executor string `gorm:"size:16;index" json:"executor"`
+	// 最近一次执行该任务的 DSH 会话 id（点击可直达该会话）。
+	SessionID string `gorm:"size:64;index" json:"sessionId"`
+	// idle / running / review / done；只读给前端画状态，不参与任务状态机。
+	RunState string `gorm:"size:16;index" json:"runState"`
+	// 最近一次领取或提交的时间，由后端在状态流转时写入。
+	LastRunAt *time.Time `json:"lastRunAt"`
+	// 仓库目录覆盖；为空时取所属项目的 sourcePath。
+	RepoPath string `gorm:"size:512" json:"repoPath"`
 
 	// 只读：子任务进度（不进数据库，查详情/列表时回填）
-	Subtasks      []Subtask `gorm:"-" json:"subtasks,omitempty"`
-	SubtaskDone   int       `gorm:"-" json:"subtaskDone"`
-	SubtaskTotal  int       `gorm:"-" json:"subtaskTotal"`
+	Subtasks     []Subtask `gorm:"-" json:"subtasks,omitempty"`
+	SubtaskDone  int       `gorm:"-" json:"subtaskDone"`
+	SubtaskTotal int       `gorm:"-" json:"subtaskTotal"`
 	// 只读：任务号（T-000012），从主键派生，发给 AI 时用它定位
 	No string `gorm:"-" json:"no"`
 }
@@ -229,21 +241,21 @@ type TicketMessage struct {
 // 通用到期提醒（证书 / 域名 / 服务器续费 / 客户续费 / 其他）
 type Reminder struct {
 	Base
-	Title    string `gorm:"size:255;not null" json:"title"`
-	Category string `gorm:"size:24;index" json:"category"` // certificate 证书 / domain 域名 / server 服务器 / client 客户续费 / other 其他
-	ProjectID *uint `gorm:"index" json:"projectId"`        // 关联项目（客户服务器上的服务）
-	Target   string `gorm:"size:512" json:"target"`        // 域名 / 主机 / 说明
+	Title     string `gorm:"size:255;not null" json:"title"`
+	Category  string `gorm:"size:24;index" json:"category"` // certificate 证书 / domain 域名 / server 服务器 / client 客户续费 / other 其他
+	ProjectID *uint  `gorm:"index" json:"projectId"`        // 关联项目（客户服务器上的服务）
+	Target    string `gorm:"size:512" json:"target"`        // 域名 / 主机 / 说明
 
 	ExpireAt   time.Time `json:"expireAt"`
 	RemindDays int       `json:"remindDays"`
 
 	// 证书专用
-	Issuer string `gorm:"size:128" json:"issuer"`
-	AutoRenew bool `json:"autoRenew"`
+	Issuer    string `gorm:"size:128" json:"issuer"`
+	AutoRenew bool   `json:"autoRenew"`
 
-	Enabled bool   `gorm:"default:true" json:"enabled"`
-	Archived bool  `gorm:"not null;default:false" json:"archived"`
-	Note    string `gorm:"type:text" json:"note"`
+	Enabled  bool   `gorm:"default:true" json:"enabled"`
+	Archived bool   `gorm:"not null;default:false" json:"archived"`
+	Note     string `gorm:"type:text" json:"note"`
 
 	// 邮件提醒发送日期（YYYY-MM-DD），同一天内不重复发送；不对外输出
 	NotifiedOn string `gorm:"size:10" json:"-"`
@@ -281,8 +293,8 @@ type Milestone struct {
 // 是一个「收件箱」——先收集，再逐条吸收。
 type Idea struct {
 	Base
-	Title   string `gorm:"size:255" json:"title"`   // 可留空，自动从链接/正文截取
-	URL     string `gorm:"size:1024" json:"url"`    // 原文链接
+	Title   string `gorm:"size:255" json:"title"`       // 可留空，自动从链接/正文截取
+	URL     string `gorm:"size:1024" json:"url"`        // 原文链接
 	Source  string `gorm:"size:32;index" json:"source"` // wechat 公众号 / github 开源 / article 文章 / video 视频 / other 其他
 	Content string `gorm:"type:text" json:"content"`    // 摘录 / 摘抄的正文片段
 	Note    string `gorm:"type:text" json:"note"`       // 我自己的思考、怎么用
