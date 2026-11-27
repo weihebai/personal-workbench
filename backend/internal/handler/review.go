@@ -18,6 +18,7 @@ type reviewTask struct {
 	Title       string     `json:"title"`
 	Bucket      string     `json:"bucket"`
 	Status      string     `json:"status"`
+	Kind        string     `json:"kind"`
 	Context     string     `json:"context"`
 	WaitingFor  string     `json:"waitingFor"`
 	FollowUpAt  *time.Time `json:"followUpAt"`
@@ -65,7 +66,7 @@ func (h *Handler) Review(c *gin.Context) {
 			bucket = "next"
 		}
 		v := reviewTask{
-			ID: t.ID, No: taskNo(t.ID), Title: t.Title, Bucket: bucket, Status: t.Status,
+			ID: t.ID, No: taskNo(t.ID), Title: t.Title, Bucket: bucket, Status: t.Status, Kind: t.Kind,
 			Context: t.Context, WaitingFor: t.WaitingFor, FollowUpAt: t.FollowUpAt,
 			DueDate: t.DueDate, ProjectID: t.ProjectID,
 		}

@@ -11,6 +11,7 @@ interface ReviewTask {
   title: string
   bucket: string
   status: string
+  kind: string
   context: string
   waitingFor: string
   followUpAt?: string | null
@@ -59,7 +60,10 @@ function Section({
           {tasks.map((t) => (
             <li key={t.id} className="flex items-center gap-2 rounded px-1 py-1 text-xs hover:bg-ink-50/60">
               {t.no && <span className="tabular shrink-0 text-[10px] text-ink-400">{t.no}</span>}
-              <Link to="/tasks" className="min-w-0 flex-1 truncate text-ink-800 hover:text-brand-600">
+              <Link
+                to={`/tasks?scope=${t.kind === 'life' ? 'life' : 'project'}&bucket=${t.bucket}&open=${t.id}`}
+                className="min-w-0 flex-1 truncate text-ink-800 hover:text-brand-600"
+              >
                 {t.title}
               </Link>
               {t.context && <span className="shrink-0 text-[10px] text-ink-400">{t.context}</span>}

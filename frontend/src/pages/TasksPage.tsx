@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   DndContext,
@@ -42,6 +42,7 @@ import {
   Home,
   Bell,
 } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import { api, errMsg, type Paged, type Task, type Attachment } from '@/lib/api'
 import { Button } from '@/components/ui/Button'
 import { Input, Textarea } from '@/components/ui/Input'
@@ -149,12 +150,17 @@ export default function TasksPage() {
   const [q, setQ] = useState('')
   const [priority, setPriority] = useState('')
   const [kind, setKind] = useState('')
+  // 从「每周回顾」点任务进来时带 scope/bucket/open，直接落在对应的筛选和那条任务上
+  const [searchParams, setSearchParams] = useSearchParams()
+  const paramScope: 'project' | 'life' = searchParams.get('scope') === 'life' ? 'life' : 'project'
+  const paramBucket = searchParams.get('bucket') ?? ''
+  const paramOpen = Number(searchParams.get('open') ?? 0)
   // GTD 归类过滤：空值表示全部
-  const [bucket, setBucket] = useState('')
+  const [bucket, setBucket] = useState(paramBucket)
   // 收集箱快速捕获：只要求一个标题，其余留空之后再理清
   const [captureText, setCaptureText] = useState('')
   // 项目任务 / 生活待办分开管理：生活类任务不挂在任何项目下
-  const [scope, setScope] = useState<'project' | 'life'>('project')
+  const [scope, setScope] = useState<'project' | 'life'>(paramScope)
   const [view, setView] = useState<'board' | 'list' | 'archived'>('board')
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
@@ -238,6 +244,29 @@ export default function TasksPage() {
 
   const items = data?.items ?? []
   const archivedItems = archivedData?.items ?? []
+
+  // 回顾页跳进来时同步筛选条件；同一页内再次点别的任务也能跟着变
+  useEffect(() => {
+    setScope(paramScope)
+    setBucket(paramBucket)
+  }, [paramScope, paramBucket])
+
+  // ?open=<id>：直接打开那条任务的编辑框，处理完清掉参数，避免刷新后重开
+  useEffect(() => {
+    if (!paramOpen) return
+    const target = items.find((t) => t.id === paramOpen)
+    if (!target) return
+    setEditing(target)
+    // 只去掉 open，保留 scope/bucket，否则筛选会被同步 effect 复位成默认值
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.delete('open')
+        return next
+      },
+      { replace: true },
+    )
+  }, [paramOpen, items, setSearchParams])
   const grouped = useMemo(() => {
     const g: Record<string, Task[]> = { todo: [], doing: [], review: [], done: [], canceled: [] }
     for (const t of items) (g[t.status] ??= []).push(t)
