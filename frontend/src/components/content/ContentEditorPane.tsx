@@ -16,8 +16,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Layout'
 import { Field, Input } from '@/components/ui/Input'
 import { Select, type Option } from '@/components/ui/Select'
-import { AttachmentGallery } from '@/pages/AttachmentGallery'
-import { MarkdownEditor, type MarkdownEditorHandle } from '@/components/content/MarkdownEditor'
+import { MarkdownEditor } from '@/components/content/MarkdownEditor'
 import { ShareControls } from '@/components/content/ShareControls'
 import { CONTENT_KIND, CONTENT_STATUS } from '@/lib/content'
 import { cn } from '@/lib/utils'
@@ -53,7 +52,6 @@ export function ContentEditorPane({
   onDeleted?: () => void
 }) {
   const qc = useQueryClient()
-  const editorRef = useRef<MarkdownEditorHandle>(null)
   const [form, setForm] = useState<FormState>({
     title: content.title ?? '',
     kind: content.kind ?? 'note',
@@ -267,23 +265,12 @@ export function ContentEditorPane({
             </div>
           </Card>
 
+          {/* 图片直接粘/拖进编辑器：上传后自动插入 Markdown，不再单独开一个图片区 */}
           <MarkdownEditor
-            ref={editorRef}
             value={form.body}
             onChange={(v) => updateForm({ body: v })}
             onUploadImage={uploadInlineImage}
           />
-
-          <Card>
-            <p className="mb-2 text-xs font-semibold text-ink-700">图片</p>
-            <AttachmentGallery
-              contentId={content.id}
-              enablePaste
-              onInsert={(a) =>
-                editorRef.current?.insertMarkdown(`![${a.name.replace(/[[]\]]/g, '') || '图片'}](${a.url})`)
-              }
-            />
-          </Card>
         </div>
 
         {infoOpen && (
