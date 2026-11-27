@@ -18,7 +18,6 @@ import RemindersPage from './pages/RemindersPage'
 import WechatFilingPage from './pages/WechatFilingPage'
 import IdeasPage from './pages/IdeasPage'
 import ContentsPage from './pages/ContentsPage'
-import ContentEditorPage from './pages/ContentEditorPage'
 import ClientsPage from './pages/ClientsPage'
 import SettingsPage from './pages/SettingsPage'
 import PublicSharePage from './pages/PublicSharePage'
@@ -77,8 +76,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route element={<SectionTabs tabs={[{ to: '/ideas', label: '灵感记录' }, { to: '/contents', label: '内容库', exact: true }]} />}>
               <Route path="/ideas" element={<IdeasPage />} />
               <Route path="/contents" element={<ContentsPage />} />
-              <Route path="/contents/new" element={<ContentEditorPage />} />
-              <Route path="/contents/:id" element={<ContentEditorPage />} />
+              <Route path="/contents/:id" element={<ContentsPage />} />
             </Route>
             <Route path="/settings" element={<SettingsPage />} />
           </Route>
