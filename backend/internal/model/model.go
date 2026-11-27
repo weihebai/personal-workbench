@@ -149,6 +149,16 @@ type Task struct {
 	Priority string `gorm:"size:16;index" json:"priority"` // low 低 / normal 普通 / high 高 / urgent 紧急
 	Kind     string `gorm:"size:16;index" json:"kind"`     // company 公司 / personal 个人 / freelance 私活
 
+	// GTD 归类桶与上下文。
+	// Bucket：inbox 收集箱 / next 下一步行动 / waiting 等待他人 / someday 将来也许，
+	// 与 Status（看板列）、RunState（AI 执行状态）分工不同，只表示这条行动归哪一类。
+	// Context 是 @电脑 / @手机 / @外出 这类场景标签，逗号分隔；
+	// WaitingFor 与 FollowUpAt 只在 Bucket=waiting 或「将来也许」复查时使用。
+	Bucket     string     `gorm:"size:16;index;default:next" json:"bucket"`
+	Context    string     `gorm:"size:255" json:"context"`
+	WaitingFor string     `gorm:"size:128" json:"waitingFor"`
+	FollowUpAt *time.Time `json:"followUpAt"`
+
 	DueDate         *time.Time `json:"dueDate"`
 	RemindDays      int        `json:"remindDays"` // 提前提醒天数
 	EstimateMinutes int        `json:"estimateMinutes"`

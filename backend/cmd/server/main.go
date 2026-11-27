@@ -153,6 +153,7 @@ func main() {
 			authed.POST("/auth/logout", ah.Logout)
 
 			authed.GET("/dashboard", h.Dashboard)
+			authed.GET("/review", h.Review)
 			authed.GET("/search", h.Search)
 
 			authed.GET("/projects", h.ListProjects)

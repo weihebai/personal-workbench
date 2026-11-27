@@ -163,6 +163,14 @@ export interface Task {
   status: 'todo' | 'doing' | 'review' | 'done' | 'canceled' | 'archived'
   priority: 'low' | 'normal' | 'high' | 'urgent'
   kind: string
+  /** GTD 归类桶：收集箱 / 下一步行动 / 等待他人 / 将来也许 */
+  bucket: 'inbox' | 'next' | 'waiting' | 'someday'
+  /** 上下文标签，逗号分隔，如 @电脑,@微信 */
+  context: string
+  /** 等待谁（bucket=waiting 时有意义） */
+  waitingFor: string
+  /** 跟进/复查日期 */
+  followUpAt?: string | null
   /** 验收标准：一行一条，任务完成的判定依据。AI 完成后流转到 review 待人工验收 */
   acceptCriteria: string
   dueDate?: string | null

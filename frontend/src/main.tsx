@@ -10,6 +10,7 @@ import DashboardPage from './pages/DashboardPage'
 import ProjectsPage from './pages/ProjectsPage'
 import ProjectDetailPage from './pages/ProjectDetailPage'
 import TasksPage from './pages/TasksPage'
+import ReviewPage from './pages/ReviewPage'
 import TicketsPage from './pages/TicketsPage'
 import PaymentsPage from './pages/PaymentsPage'
 import RemindersPage from './pages/RemindersPage'
@@ -57,6 +58,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/projects/:id" element={<ProjectDetailPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/review" element={<ReviewPage />} />
             <Route path="/tickets" element={<TicketsPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/reminders" element={<RemindersPage />} />

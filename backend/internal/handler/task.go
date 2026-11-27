@@ -12,6 +12,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// GTD 归类桶：与看板 status 是两个维度，取值固定，写入前统一校验。
+var taskBuckets = map[string]bool{"inbox": true, "next": true, "waiting": true, "someday": true}
+
+func normalizeBucket(b string) string {
+	if taskBuckets[b] {
+		return b
+	}
+	return "next"
+}
+
+func validBucket(b string) bool { return taskBuckets[b] }
+
 // 截止状态：normal 正常 / soon 临近 / overdue 已逾期
 func dueState(t *time.Time, remindDays int) string {
 	if t == nil {
@@ -43,7 +55,7 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		like := "%" + s + "%"
 		q = q.Where("title LIKE ? OR desc LIKE ? OR note LIKE ?", like, like, like)
 	}
-	for _, k := range []string{"status", "priority", "kind"} {
+	for _, k := range []string{"status", "priority", "kind", "bucket"} {
 		if v := c.Query(k); v != "" {
 			q = q.Where(k+" = ?", v)
 		}
@@ -56,6 +68,9 @@ func (h *Handler) ListTasks(c *gin.Context) {
 	}
 	if id := queryUint(c, "projectId"); id != nil {
 		q = q.Where("project_id = ?", *id)
+	}
+	if v := strings.TrimSpace(c.Query("context")); v != "" {
+		q = q.Where("context LIKE ?", "%"+v+"%")
 	}
 	if c.Query("overdue") == "1" {
 		q = q.Where("due_date IS NOT NULL AND due_date < ? AND status NOT IN ?", time.Now(), []string{"done", "canceled", "archived"})
@@ -151,6 +166,10 @@ type taskInput struct {
 	Status          string  `json:"status"`
 	Priority        string  `json:"priority"`
 	Kind            string  `json:"kind"`
+	Bucket          string  `json:"bucket"`
+	Context         string  `json:"context"`
+	WaitingFor      string  `json:"waitingFor"`
+	FollowUpAt      string  `json:"followUpAt"`
 	DueDate         string  `json:"dueDate"`
 	RemindAt        string  `json:"remindAt"`
 	RemindDays      int     `json:"remindDays"`
@@ -174,7 +193,9 @@ func (h *Handler) CreateTask(c *gin.Context) {
 		Title: in.Title, Desc: in.Desc, AcceptCriteria: in.AcceptCriteria,
 		ProjectID: in.ProjectID, ClientID: in.ClientID,
 		Status: in.Status, Priority: in.Priority, Kind: in.Kind,
-		DueDate: mustParseDate(in.DueDate), RemindAt: mustParseLocal(in.RemindAt), RemindDays: in.RemindDays,
+		Bucket: normalizeBucket(in.Bucket), Context: in.Context, WaitingFor: in.WaitingFor,
+		FollowUpAt: mustParseDate(in.FollowUpAt),
+		DueDate:    mustParseDate(in.DueDate), RemindAt: mustParseLocal(in.RemindAt), RemindDays: in.RemindDays,
 		EstimateMinutes: in.EstimateMinutes, ActualMinutes: in.ActualMinutes,
 		Budget: in.Budget, Note: in.Note,
 	}
@@ -213,11 +234,20 @@ func (h *Handler) UpdateTask(c *gin.Context) {
 		return
 	}
 	updates := map[string]any{}
-	strFields := map[string]string{"title": "title", "desc": "desc", "status": "status", "priority": "priority", "kind": "kind", "note": "note", "acceptCriteria": "accept_criteria", "executor": "executor", "sessionId": "session_id", "runState": "run_state", "repoPath": "repo_path"}
+	strFields := map[string]string{"title": "title", "desc": "desc", "status": "status", "priority": "priority", "kind": "kind", "note": "note", "acceptCriteria": "accept_criteria", "executor": "executor", "sessionId": "session_id", "runState": "run_state", "repoPath": "repo_path",
+		"bucket": "bucket", "context": "context", "waitingFor": "waiting_for"}
 	for js, col := range strFields {
 		if v, ok := raw[js]; ok {
 			updates[col] = v
 		}
+	}
+	if s, ok := updates["bucket"].(string); ok && !validBucket(s) {
+		badRequest(c, "归类桶不合法")
+		return
+	}
+	if v, ok := raw["followUpAt"]; ok {
+		s, _ := v.(string)
+		updates["follow_up_at"] = mustParseDate(s)
 	}
 	if v, ok := raw["projectId"]; ok {
 		updates["project_id"] = v

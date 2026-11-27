@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/Button'
 import { Field, Input, Textarea } from '@/components/ui/Input'
 import { Select, type Option } from '@/components/ui/Select'
 import { DatePicker } from '@/components/ui/DatePicker'
-import { TASK_PRIORITY, TASK_STATUS } from '@/lib/utils'
+import { TASK_BUCKET, TASK_PRIORITY, TASK_STATUS } from '@/lib/utils'
 import { Dialog } from '@/components/ui/Layout'
 import { toDateInput } from '@/lib/utils'
 import { SubtaskList } from './SubtaskList'
@@ -48,6 +48,10 @@ export function TaskFormDialog({
     status: task?.status ?? 'todo',
     priority: task?.priority ?? 'normal',
     kind: task?.kind ?? defaultKind ?? 'freelance',
+    bucket: task?.bucket ?? 'next',
+    context: task?.context ?? '',
+    waitingFor: task?.waitingFor ?? '',
+    followUpAt: toDateInput(task?.followUpAt),
     dueDate: toDateInput(task?.dueDate),
     remindAt: toDateTimeInput(task?.remindAt),
     remindDays: String(task?.remindDays ?? 1),
@@ -109,6 +113,11 @@ export function TaskFormDialog({
     label: d.label,
     dot: d.color,
   }))
+  const bucketOpts: Option[] = Object.entries(TASK_BUCKET).map(([v, d]) => ({
+    value: v,
+    label: d.label,
+    dot: d.color,
+  }))
   const projOpts: Option[] = [
     { value: '', label: '不关联项目' },
     ...(projects ?? []).map((p) => ({ value: String(p.id), label: p.name })),
@@ -152,6 +161,12 @@ export function TaskFormDialog({
           <Field label="优先级">
             <Select value={form.priority} onChange={setV('priority')} options={priorityOpts} />
           </Field>
+          <Field label="归类" hint="收集箱先记下，理顺后再进「下一步」">
+            <Select value={form.bucket} onChange={setV('bucket')} options={bucketOpts} />
+          </Field>
+          <Field label="上下文" hint="@电脑 / @微信 / @外出，逗号分隔">
+            <Input value={form.context} onChange={set('context')} placeholder="@电脑,@微信" />
+          </Field>
           {!lockProject && (
             <Field label="所属项目">
               <Select
@@ -191,6 +206,12 @@ export function TaskFormDialog({
               )}
               <Field label="预计工时" hint="分钟，60 = 1 小时；完成时会对照着记录实际用了多久">
                 <Input value={form.estimateMinutes} onChange={set('estimateMinutes')} inputMode="numeric" />
+              </Field>
+              <Field label="等待谁" hint="仅「等待中」用：等客户确认、等中介结款">
+                <Input value={form.waitingFor} onChange={set('waitingFor')} placeholder="客户 / 中介 / 同事" />
+              </Field>
+              <Field label="跟进日期" hint="到这天在「每周回顾」里提醒自己催一下">
+                <DatePicker value={form.followUpAt} onChange={setV('followUpAt')} />
               </Field>
             </>
           )}

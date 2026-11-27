@@ -16,6 +16,7 @@ import {
 } from '@dnd-kit/core'
 import {
   Plus,
+  Inbox,
   Search,
   CheckSquare,
   Trash2,
@@ -54,6 +55,7 @@ import {
   dictOf,
   TASK_STATUS,
   TASK_PRIORITY,
+  TASK_BUCKET,
 } from '@/lib/utils'
 import { TaskFormDialog } from './TaskFormDialog'
 import { TaskCompleteDialog } from '@/components/TaskCompleteDialog'
@@ -63,6 +65,11 @@ const PRIORITY_FILTER: Option[] = [
   { value: '', label: '全部优先级' },
   ...Object.entries(TASK_PRIORITY).map(([v, d]) => ({ value: v, label: d.label, dot: d.color })),
 ]
+const BUCKET_FILTER: Option[] = [
+  { value: '', label: '全部归类' },
+  ...Object.entries(TASK_BUCKET).map(([v, d]) => ({ value: v, label: d.label, dot: d.color })),
+]
+
 const KIND_FILTER: Option[] = [
   { value: '', label: '全部归属' },
   { value: 'company', label: '公司' },
@@ -142,6 +149,10 @@ export default function TasksPage() {
   const [q, setQ] = useState('')
   const [priority, setPriority] = useState('')
   const [kind, setKind] = useState('')
+  // GTD 归类过滤：空值表示全部
+  const [bucket, setBucket] = useState('')
+  // 收集箱快速捕获：只要求一个标题，其余留空之后再理清
+  const [captureText, setCaptureText] = useState('')
   // 项目任务 / 生活待办分开管理：生活类任务不挂在任何项目下
   const [scope, setScope] = useState<'project' | 'life'>('project')
   const [view, setView] = useState<'board' | 'list' | 'archived'>('board')
@@ -157,7 +168,7 @@ export default function TasksPage() {
   const qc = useQueryClient()
 
   const { data, isLoading } = useQuery({
-    queryKey: ['tasks', scope, q, priority, kind],
+    queryKey: ['tasks', scope, q, priority, kind, bucket],
     queryFn: async () =>
       (
         await api.get<Paged<Task>>('/tasks', {
@@ -166,6 +177,7 @@ export default function TasksPage() {
           params: {
             q,
             priority,
+            bucket,
             ...(scope === 'life' ? { kind: 'life' } : { excludeKind: 'life', kind }),
             size: 200,
             sort: 'due',
@@ -205,6 +217,16 @@ export default function TasksPage() {
     }
     patch.mutate({ id: t.id, body: { status: toDone ? 'done' : 'todo' } })
   }
+
+  const capture = useMutation({
+    mutationFn: async (title: string) =>
+      api.post('/tasks', { title, bucket: 'inbox', kind: scope === 'life' ? 'life' : 'freelance' }),
+    onSuccess: () => {
+      setCaptureText('')
+      qc.invalidateQueries({ queryKey: ['tasks'] })
+      qc.invalidateQueries({ queryKey: ['dashboard-badges'] })
+    },
+  })
 
   const del = useMutation({
     mutationFn: async (id: number) => api.delete(`/tasks/${id}`),
@@ -344,6 +366,35 @@ export default function TasksPage() {
         }
       />
 
+      <div className="mb-3 flex items-center gap-2">
+        <div className="relative flex-1">
+          <Inbox size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-400" />
+          <Input
+            value={captureText}
+            onChange={(e) => setCaptureText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && captureText.trim() && !capture.isPending) capture.mutate(captureText.trim())
+            }}
+            placeholder="想到什么先记下来，稍后再理清"
+            className="h-8 pl-8 text-xs"
+          />
+        </div>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!captureText.trim() || capture.isPending}
+          onClick={() => capture.mutate(captureText.trim())}
+        >
+          <Plus size={14} /> 收集
+        </Button>
+      </div>
+
+      {bucket && (
+        <p className="mb-2 text-[10px] text-ink-400">
+          {`已按「${dictOf(TASK_BUCKET, bucket).label}」筛选：看板列和列表只显示这一类；列本身仍表示执行进度`}
+        </p>
+      )}
+
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <div className="flex shrink-0 rounded-md border border-[var(--border)] bg-white p-0.5">
           <button
@@ -381,6 +432,7 @@ export default function TasksPage() {
           />
         </div>
         <Select value={priority} onChange={setPriority} options={PRIORITY_FILTER} size="sm" className="w-32" />
+        <Select value={bucket} onChange={setBucket} options={BUCKET_FILTER} size="sm" className="w-28" />
         {scope === 'project' && (
           <Select value={kind} onChange={setKind} options={KIND_FILTER} size="sm" className="w-28" />
         )}
@@ -605,6 +657,9 @@ export default function TasksPage() {
                             {t.no && <span className="tabular mr-1.5 text-[10px] text-ink-400">{t.no}</span>}
                             {t.title}
                           </span>
+                          {t.bucket && t.bucket !== 'next' && (
+                            <Badge soft={dictOf(TASK_BUCKET, t.bucket).soft}>{dictOf(TASK_BUCKET, t.bucket).label}</Badge>
+                          )}
                           <StepsToggle task={t} open={open} onToggle={() => toggleSteps(t.id)} />
                           {/* 只有验收标准、没有步骤的任务也要能点开和收起 */}
                           {t.acceptCriteria && !(t.subtaskTotal ?? 0) && (
@@ -798,6 +853,7 @@ function TaskCard({
   onReject?: (reason: string) => void
 }) {
   const ps = dictOf(TASK_PRIORITY, task.priority)
+  const bs = dictOf(TASK_BUCKET, task.bucket || 'next')
   const overdue = task.dueState === 'overdue'
   const soon = task.dueState === 'soon'
   const done = task.status === 'done'
@@ -898,6 +954,11 @@ function TaskCard({
         <Badge soft={ps.soft} dot={ps.color}>
           {ps.label}
         </Badge>
+        {task.bucket && task.bucket !== 'next' && (
+          <Badge soft={bs.soft} dot={bs.color}>
+            {bs.label}
+          </Badge>
+        )}
         {/* 步骤进度徽标点一下就在卡片内展开，不用进编辑弹窗 */}
         {!overlay && onToggleSteps && (
           <StepsToggle task={task} open={!!stepsOpen} onToggle={onToggleSteps} />

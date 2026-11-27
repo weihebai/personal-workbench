@@ -2,6 +2,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard,
+  CalendarCheck,
   FolderKanban,
   CheckSquare,
   Ticket,
@@ -30,6 +31,7 @@ const nav = [
   { to: '/', label: '总览', icon: LayoutDashboard, exact: true },
   { to: '/projects', label: '项目', icon: FolderKanban },
   { to: '/tasks', label: '任务', icon: CheckSquare },
+  { to: '/review', label: '每周回顾', short: '回顾', icon: CalendarCheck },
   { to: '/tickets', label: '工单', icon: Ticket },
   { to: '/payments', label: '收款', icon: Wallet },
   { to: '/reminders', label: '到期提醒', short: '提醒', icon: BellRing },

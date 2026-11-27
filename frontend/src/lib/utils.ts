@@ -82,6 +82,13 @@ export const TASK_STATUS = {
   archived: { label: '已归档', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-400 border-ink-200' },
 } as const
 
+export const TASK_BUCKET = {
+  inbox: { label: '收集箱', color: 'bg-violet-500', soft: 'bg-violet-50 text-violet-700 border-violet-200' },
+  next: { label: '下一步', color: 'bg-brand-500', soft: 'bg-brand-50 text-brand-700 border-brand-200' },
+  waiting: { label: '等待中', color: 'bg-amber-500', soft: 'bg-amber-50 text-amber-700 border-amber-200' },
+  someday: { label: '将来也许', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-500 border-ink-200' },
+} as const
+
 export const TASK_PRIORITY = {
   low: { label: '低', color: 'bg-ink-300', soft: 'bg-ink-50 text-ink-500 border-ink-200' },
   normal: { label: '普通', color: 'bg-sky-500', soft: 'bg-sky-50 text-sky-700 border-sky-200' },
