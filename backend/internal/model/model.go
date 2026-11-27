@@ -171,6 +171,12 @@ type Task struct {
 	LastRunAt *time.Time `json:"lastRunAt"`
 	// 仓库目录覆盖；为空时取所属项目的 sourcePath。
 	RepoPath string `gorm:"size:512" json:"repoPath"`
+	// 当前 DSH 执行标识及完整执行历史。只有显式 handoff 能把任务移到 review。
+	CurrentExecutionID string `gorm:"size:64;index" json:"currentExecutionId"`
+	ExecutionsJSON     string `gorm:"type:text" json:"-"`
+	// 人工逐条验收状态；与 AI 执行报告分开存储。
+	AcceptanceJSON string           `gorm:"type:text" json:"-"`
+	Acceptance     []map[string]any `gorm:"-" json:"acceptance,omitempty"`
 
 	// 只读：子任务进度（不进数据库，查详情/列表时回填）
 	Subtasks     []Subtask `gorm:"-" json:"subtasks,omitempty"`

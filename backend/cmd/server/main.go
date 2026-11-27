@@ -184,6 +184,12 @@ func main() {
 			authed.POST("/tasks", h.CreateTask)
 			authed.PUT("/tasks/:id", h.UpdateTask)
 			authed.DELETE("/tasks/:id", h.DeleteTask)
+			authed.POST("/tasks/:id/executions", h.StartTaskExecution)
+			authed.PATCH("/tasks/:id/executions/:executionId", h.UpdateTaskExecution)
+			authed.POST("/tasks/:id/executions/:executionId/handoff", h.HandoffTaskExecution)
+			authed.GET("/tasks/:id/executions", h.ListTaskExecutions)
+			authed.POST("/tasks/:id/reject", h.RejectTaskExecution)
+			authed.PUT("/tasks/:id/acceptance", h.UpdateTaskAcceptance)
 
 			// 子任务（任务内的步骤清单）
 			authed.GET("/tasks/:id/subtasks", h.ListSubtasks)

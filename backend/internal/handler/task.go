@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -124,6 +126,18 @@ func (h *Handler) ListTasks(c *gin.Context) {
 		views[i].SubtaskTotal = flat[i].SubtaskTotal
 		views[i].SubtaskDone = flat[i].SubtaskDone
 		views[i].Subtasks = flat[i].Subtasks
+		if strings.TrimSpace(views[i].AcceptanceJSON) != "" {
+			var acceptance []map[string]any
+			if json.Unmarshal([]byte(views[i].AcceptanceJSON), &acceptance) == nil {
+				views[i].Acceptance = acceptance
+			}
+		} else if strings.TrimSpace(views[i].AcceptCriteria) != "" {
+			for index, line := range strings.Split(views[i].AcceptCriteria, "\n") {
+				if text := strings.TrimSpace(line); text != "" {
+					views[i].Acceptance = append(views[i].Acceptance, map[string]any{"id": fmt.Sprintf("ac-%d", index), "text": text, "checked": false})
+				}
+			}
+		}
 	}
 	c.JSON(http.StatusOK, paginated(views, total, page, size))
 }
