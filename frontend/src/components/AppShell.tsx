@@ -2,15 +2,11 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router-do
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   LayoutDashboard,
-  CalendarCheck,
   FolderKanban,
   CheckSquare,
-  Ticket,
   Wallet,
   BellRing,
-  Lightbulb,
   LibraryBig,
-  Users,
   Settings,
   Search,
   LogOut,
@@ -19,7 +15,6 @@ import {
   CornerDownLeft,
   Eye,
   EyeOff,
-  ShieldCheck,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandMark } from '@/components/BrandMark'
@@ -27,22 +22,21 @@ import { useEscClose } from '@/lib/useEscClose'
 import { api, getToken, setToken, type DashboardData } from '@/lib/api'
 import { useQuery } from '@tanstack/react-query'
 
+// 侧栏一级入口。同一类功能收在一个入口下，用页签切换，避免一级菜单堆十几项。
+// match 列出这个入口覆盖的全部路由前缀，用于高亮。
 const nav = [
-  { to: '/', label: '总览', icon: LayoutDashboard, exact: true },
-  { to: '/projects', label: '项目', icon: FolderKanban },
-  { to: '/tasks', label: '任务', icon: CheckSquare },
-  { to: '/review', label: '每周回顾', short: '回顾', icon: CalendarCheck },
-  { to: '/tickets', label: '工单', icon: Ticket },
-  { to: '/payments', label: '收款', icon: Wallet },
-  { to: '/reminders', label: '到期提醒', short: '提醒', icon: BellRing },
-  { to: '/wechat-filing', label: '备案监控', short: '备案', icon: ShieldCheck },
-  { to: '/ideas', label: '灵感记录', short: '灵感', icon: Lightbulb },
-  { to: '/contents', label: '内容库', short: '内容', icon: LibraryBig },
-  { to: '/clients', label: '客户', icon: Users },
+  { to: '/', label: '总览', icon: LayoutDashboard, match: ['/', '/review'] },
+  { to: '/projects', label: '项目', icon: FolderKanban, match: ['/projects', '/tickets'] },
+  { to: '/tasks', label: '任务', icon: CheckSquare, match: ['/tasks'] },
+  { to: '/payments', label: '财务', icon: Wallet, match: ['/payments', '/clients'] },
+  { to: '/reminders', label: '提醒', icon: BellRing, match: ['/reminders', '/wechat-filing'] },
+  { to: '/contents', label: '内容', icon: LibraryBig, match: ['/ideas', '/contents'] },
 ]
 
-// 移动端底部 Tab：灵感是高频入口放进来；客户放进抽屉
-const mobileNav = nav.filter((n) => n.to !== '/clients' && n.to !== '/wechat-filing')
+// 路径是否落在某个一级入口内；'/' 要精确匹配，否则它会吞掉所有路由
+function within(pathname: string, item: { to: string; match: string[] }) {
+  return item.match.some((p) => (p === '/' ? pathname === '/' : pathname === p || pathname.startsWith(p + '/')))
+}
 
 export default function AppShell() {
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -95,7 +89,7 @@ export default function AppShell() {
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
           {nav.map((item) => {
             const Icon = item.icon
-            const active = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
+            const active = within(location.pathname, item)
             const badge = badges[item.to] ?? 0
             return (
               <NavLink
@@ -206,9 +200,9 @@ export default function AppShell() {
 
         {/* 移动端底部 Tab */}
         <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-[var(--border)] bg-white/95 backdrop-blur-md safe-bottom lg:hidden">
-          {mobileNav.map((item) => {
+          {nav.map((item) => {
             const Icon = item.icon
-            const active = item.exact ? location.pathname === item.to : location.pathname.startsWith(item.to)
+            const active = within(location.pathname, item)
             const badge = badges[item.to] ?? 0
             return (
               <NavLink
@@ -220,7 +214,7 @@ export default function AppShell() {
                 )}
               >
                 <Icon size={19} strokeWidth={active ? 2.4 : 1.9} />
-                <span className="text-[10px] font-medium">{item.short ?? item.label}</span>
+                <span className="text-[10px] font-medium">{item.label}</span>
                 {badge > 0 && (
                   <span className="absolute right-1/2 top-1 -mr-4 min-w-4 rounded-full bg-red-500 px-1 text-center text-[9px] font-bold leading-4 text-white">
                     {badge > 99 ? '99' : badge}
